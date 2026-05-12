@@ -1,0 +1,86 @@
+name: Network Connectivity Test
+
+on:
+  workflow_dispatch:  # 只能手动触发
+
+jobs:
+  test-network:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Runner location info
+        run: |
+          echo "========== Runner 位置信息 =========="
+          curl -s https://ipinfo.io || echo "ipinfo failed"
+          echo ""
+          echo "========== 系统信息 =========="
+          uname -a
+          cat /etc/os-release | head -3
+
+      - name: Test connectivity to Volcano Engine CR
+        continue-on-error: true
+        run: |
+          echo "========== 火山云 CR 连通性测试 =========="
+          VOLC_CR="你的火山云CR域名.cr.volces.com"  # 改成你的
+          
+          echo "--- DNS 解析 ---"
+          nslookup ${VOLC_CR} || echo "DNS failed"
+          echo ""
+          
+          echo "--- 3 次 HTTPS 探测 ---"
+          for i in 1 2 3; do
+            curl -o /dev/null -s -w "Try $i - HTTP: %{http_code}  DNS: %{time_namelookup}s  Connect: %{time_connect}s  Total: %{time_total}s\n" \
+              --max-time 15 \
+              "https://${VOLC_CR}/v2/" || echo "Try $i timeout/failed"
+          done
+
+      - name: Test connectivity to Huawei Cloud SWR
+        continue-on-error: true
+        run: |
+          echo "========== 华为云 SWR 连通性测试 =========="
+          HUAWEI_SWR="swr.cn-north-4.myhuaweicloud.com"  # 改成你的区域
+          
+          echo "--- DNS 解析 ---"
+          nslookup ${HUAWEI_SWR} || echo "DNS failed"
+          echo ""
+          
+          echo "--- 3 次 HTTPS 探测 ---"
+          for i in 1 2 3; do
+            curl -o /dev/null -s -w "Try $i - HTTP: %{http_code}  DNS: %{time_namelookup}s  Connect: %{time_connect}s  Total: %{time_total}s\n" \
+              --max-time 15 \
+              "https://${HUAWEI_SWR}/v2/" || echo "Try $i timeout/failed"
+          done
+
+      - name: Optional - Test docker push speed (跳过则注释整段)
+        continue-on-error: true
+        env:
+          # 在 repo 的 Settings → Secrets 里加这两个,先不加就跳过这步
+          CR_USERNAME: ${{ secrets.VOLC_CR_USERNAME }}
+          CR_PASSWORD: ${{ secrets.VOLC_CR_PASSWORD }}
+        run: |
+          if [ -z "$CR_USERNAME" ] || [ -z "$CR_PASSWORD" ]; then
+            echo "未配置 CR 凭证,跳过 push 测试"
+            exit 0
+          fi
+          
+          VOLC_CR="你的火山云CR域名.cr.volces.com"
+          VOLC_NAMESPACE="your-namespace"  # 改成你的 namespace
+          
+          echo "--- 登录火山云 CR ---"
+          echo "$CR_PASSWORD" | docker login ${VOLC_CR} -u "$CR_USERNAME" --password-stdin
+          
+          echo "--- 拉取小镜像作为基础层 ---"
+          docker pull alpine:latest
+          
+          echo "--- 构造一个 100MB 测试镜像 ---"
+          mkdir -p /tmp/test-image
+          dd if=/dev/urandom of=/tmp/test-image/dummy bs=1M count=100
+          cat > /tmp/test-image/Dockerfile <<EOF
+          FROM alpine:latest
+          COPY dummy /dummy
+          EOF
+          docker build -t ${VOLC_CR}/${VOLC_NAMESPACE}/network-test:$(date +%s) /tmp/test-image
+          
+          echo "--- 推送测试 (这一步的耗时就是真实推送速度) ---"
+          IMAGE_TAG=${VOLC_CR}/${VOLC_NAMESPACE}/network-test:$(date +%s)
+          docker tag ${VOLC_CR}/${VOLC_NAMESPACE}/network-test:$(date +%s) $IMAGE_TAG
+          time docker push $IMAGE_TAG
