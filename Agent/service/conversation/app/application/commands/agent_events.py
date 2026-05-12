@@ -23,9 +23,8 @@ class DecisionAgentAgUiEventCommand:
     conversation_id: int
     turn_id: int
     message_id: int
-    content: str
     sequence: int
-    ag_ui: str
+    ag_ui_event: dict[str, Any]
     trace_id: str = ""
     correlation_id: str = ""
     occurred_time: int | None = None

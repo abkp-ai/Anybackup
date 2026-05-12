@@ -17,11 +17,7 @@ from app.application.models.conversation import (
 from app.application.ports.id_generator import IdGenerator
 from app.application.ports.unit_of_work import UnitOfWork
 from app.application.use_cases.access import ensure_conversation_owner
-from app.domain.conversation import (
-    Conversation,
-    ConversationStatus,
-    InteractionStatus,
-)
+from app.domain.conversation import Conversation, ConversationStatus
 from app.domain.shared.errors import DomainError, ErrorReason
 
 logger = logging.getLogger(__name__)
@@ -90,7 +86,6 @@ class CopyConversationConfigHandler:
                 owner_user_id=user.user_id,
                 title=command.title or f"{source.title} copy",
                 status=ConversationStatus.ACTIVE,
-                interaction_status=InteractionStatus.IDLE,
                 tags=tags,
                 scenario_binding=scenario_binding,
                 summary=None,
@@ -104,9 +99,8 @@ class CopyConversationConfigHandler:
             status_event = ConversationStatusEventRecord(
                 status_event_id=status_event_id,
                 conversation_id=conversation_id,
-                event_type="interaction.status_changed",
+                event_type="conversation.config_copied",
                 sequence=1,
-                interaction_status=InteractionStatus.IDLE,
                 title="Conversation config copied",
                 detail="Copied reusable configuration from source conversation",
                 payload={
@@ -232,9 +226,8 @@ def _conversation_guard(record: ConversationRecord) -> Conversation:
         owner_user_id=record.owner_user_id,
         title=record.title,
         status=record.status,
-        interaction_status=record.interaction_status,
         last_active_time=record.last_active_time,
-        active_turn_id=record.active_turn_id,
+        active_run_id=record.active_run_id,
         archived_time=record.archived_time,
         archived_by=record.archived_by,
         archive_reason=record.archive_reason,

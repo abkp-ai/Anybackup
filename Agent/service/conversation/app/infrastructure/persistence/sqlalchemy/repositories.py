@@ -29,7 +29,7 @@ from app.application.ports.repositories import (
     StatusEventRepository,
     WritebackIdempotencyRepository,
 )
-from app.domain.conversation import Conversation, ConversationStatus, InteractionStatus
+from app.domain.conversation import Conversation, ConversationStatus
 from app.domain.message import MessageStatus
 from app.infrastructure.persistence.sqlalchemy.models import (
     ConversationCandidateSelectionModel,
@@ -115,7 +115,7 @@ class SqlAlchemyConversationRepository(ConversationRepository):
                 ConversationModel.f_status == ConversationStatus.ACTIVE.value,
                 ConversationModel.f_legal_hold.is_(False),
                 ConversationModel.f_last_active_time < last_active_before_ms,
-                ConversationModel.f_interaction_status == InteractionStatus.IDLE.value,
+                ConversationModel.f_active_run_id.is_(None),
             )
             .order_by(ConversationModel.f_last_active_time.asc())
             .limit(limit)
@@ -150,13 +150,12 @@ def _conversation_to_model(conversation: Conversation) -> ConversationModel:
         f_title=conversation.title,
         f_display_summary=conversation.summary,
         f_status=conversation.status.value,
-        f_interaction_status=conversation.interaction_status.value,
         f_scenario_binding=conversation.scenario_binding,
         f_tags=list(conversation.tags),
         f_retention_policy=conversation.retention_policy,
         f_legal_hold=conversation.legal_hold,
         f_last_active_time=conversation.last_active_time,
-        f_active_turn_id=conversation.active_turn_id,
+        f_active_run_id=conversation.active_run_id,
         f_archived_time=conversation.archived_time,
         f_archived_by=conversation.archived_by,
         f_archive_reason=conversation.archive_reason,
@@ -179,11 +178,10 @@ def _model_to_conversation(model: ConversationModel) -> Conversation:
         scenario_binding=model.f_scenario_binding,
         tags=tuple(model.f_tags or ()),
         status=ConversationStatus(model.f_status),
-        interaction_status=InteractionStatus(model.f_interaction_status),
         retention_policy=model.f_retention_policy,
         legal_hold=model.f_legal_hold,
         last_active_time=model.f_last_active_time,
-        active_turn_id=model.f_active_turn_id,
+        active_run_id=model.f_active_run_id,
         archived_time=model.f_archived_time,
         archived_by=model.f_archived_by,
         archive_reason=model.f_archive_reason,
@@ -202,13 +200,12 @@ def _conversation_record_to_model(record: ConversationRecord) -> ConversationMod
         f_title=record.title,
         f_display_summary=record.summary,
         f_status=record.status.value,
-        f_interaction_status=record.interaction_status.value,
         f_scenario_binding=record.scenario_binding,
         f_tags=list(record.tags),
         f_retention_policy=record.retention_policy,
         f_legal_hold=record.legal_hold,
         f_last_active_time=record.last_active_time,
-        f_active_turn_id=record.active_turn_id,
+        f_active_run_id=record.active_run_id,
         f_archived_time=record.archived_time,
         f_archived_by=record.archived_by,
         f_archive_reason=record.archive_reason,
@@ -231,12 +228,11 @@ def _conversation_model_to_record(model: ConversationModel) -> ConversationRecor
         scenario_binding=model.f_scenario_binding,
         tags=tuple(model.f_tags or ()),
         status=ConversationStatus(model.f_status),
-        interaction_status=InteractionStatus(model.f_interaction_status),
         latest_message_summary=None,
         retention_policy=model.f_retention_policy,
         legal_hold=model.f_legal_hold,
         last_active_time=model.f_last_active_time,
-        active_turn_id=model.f_active_turn_id,
+        active_run_id=model.f_active_run_id,
         archived_time=model.f_archived_time,
         archived_by=model.f_archived_by,
         archive_reason=model.f_archive_reason,
@@ -559,21 +555,42 @@ class SqlAlchemyStatusEventRepository(StatusEventRepository):
             Page(next_cursor=next_cursor, has_more=has_more, limit=limit),
         )
 
+    async def list_ag_ui_after_sequence(
+        self,
+        conversation_id: int,
+        *,
+        run_id: str,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[ConversationStatusEventRecord, ...]:
+        result = await self._session.execute(
+            select(ConversationStatusEventModel)
+            .where(
+                ConversationStatusEventModel.f_conversation_id == conversation_id,
+                ConversationStatusEventModel.f_sequence > after_sequence,
+                cast(ConversationStatusEventModel.f_payload, String).like(
+                    f'%"{run_id}"%'
+                ),
+            )
+            .order_by(ConversationStatusEventModel.f_sequence.asc())
+            .limit(limit)
+        )
+        return tuple(_status_event_model_to_record(model) for model in result.scalars().all())
+
 
 def _status_event_record_to_model(
     record: ConversationStatusEventRecord,
 ) -> ConversationStatusEventModel:
     payload = dict(record.payload or {})
-    if record.interaction_status is not None:
-        payload["interaction_status"] = record.interaction_status.value
-    if record.message_status is not None:
-        payload["message_status"] = record.message_status.value
-    if record.title is not None:
-        payload["title"] = record.title
-    if record.detail is not None:
-        payload["detail"] = record.detail
-    if record.rich_payload is not None:
-        payload["rich_payload"] = record.rich_payload
+    if payload.get("type") is None:
+        if record.message_status is not None:
+            payload["message_status"] = record.message_status.value
+        if record.title is not None:
+            payload["title"] = record.title
+        if record.detail is not None:
+            payload["detail"] = record.detail
+        if record.rich_payload is not None:
+            payload["rich_payload"] = record.rich_payload
     return ConversationStatusEventModel(
         f_status_event_id=record.status_event_id,
         f_conversation_id=record.conversation_id,
@@ -595,7 +612,6 @@ def _status_event_model_to_record(
     model: ConversationStatusEventModel,
 ) -> ConversationStatusEventRecord:
     payload = dict(model.f_payload or {})
-    interaction_status = payload.get("interaction_status")
     message_status = payload.get("message_status")
     return ConversationStatusEventRecord(
         status_event_id=model.f_status_event_id,
@@ -604,9 +620,6 @@ def _status_event_model_to_record(
         turn_id=model.f_turn_id,
         event_type=model.f_event_type,
         sequence=model.f_sequence,
-        interaction_status=(
-            InteractionStatus(interaction_status) if interaction_status is not None else None
-        ),
         message_status=MessageStatus(message_status) if message_status is not None else None,
         title=payload.get("title"),
         detail=payload.get("detail"),

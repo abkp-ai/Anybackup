@@ -1,13 +1,13 @@
 ---
 name: ag-ui-response
-description: Use when an Agent must produce user-visible Markdown and wrap it into the Decision Agent MQ field payload.ag_ui.
+description: Use when an Agent must produce standard AG-UI events and wrap them into the Decision Agent MQ field payload.ag_ui_event.
 ---
 
-# AG-UI Markdown 回复技能
+# AG-UI 事件回复技能
 
 ## 触发时机
 
-在 Agent 需要向会话侧回写用户可见业务内容时，使用本技能生成 Markdown 文本，并把该文本包装到 MQ 消息的 `payload.ag_ui` 字段中。
+在 Agent 需要向会话侧回写用户可见状态、工具审批结果或运行生命周期时，使用本技能生成标准 AG-UI 事件对象，并把事件包装到 MQ 消息的 `payload.ag_ui_event` 字段中。
 
 适用内容包括：
 
@@ -16,7 +16,7 @@ description: Use when an Agent must produce user-visible Markdown and wrap it in
 
 ## 强制输出门禁
 
-在执行任何会产生用户可见状态变化的业务动作前，必须先完成对应 Markdown 文本的生成、校验和 MQ 发布。发布成功前，不得继续执行下一步业务动作。
+在执行任何会产生用户可见状态变化的业务动作前，必须先完成对应 AG-UI 事件生成、校验和 MQ 发布。发布成功前，不得继续执行下一步业务动作。
 
 缺少本技能时，Agent 必须停止业务执行并返回配置错误。读取本技能前，不得调用业务工具、查询知识网络、下发恢复任务或执行验证。
 
@@ -24,7 +24,7 @@ description: Use when an Agent must produce user-visible Markdown and wrap it in
 
 ## 输出契约
 
-MQ 外层保持不变，`payload.ag_ui` 必须是非空 Markdown 字符串。
+MQ 外层保持不变，`payload.ag_ui_event` 必须是标准 AG-UI 事件对象；不得再输出 Markdown 字符串线格式，也不得把 `rich_payload` 放进 SSE 线格式。
 
 ```json
 {
@@ -33,9 +33,22 @@ MQ 外层保持不变，`payload.ag_ui` 必须是非空 Markdown 字符串。
     "conversation_id": "100",
     "turn_id": "200",
     "message_id": "901",
-    "content": "方案设计已生成。",
     "sequence": 1,
-    "ag_ui": "# 方案设计\n\n这里是 Markdown 内容。"
+    "ag_ui_event": {
+      "type": "STATE_SNAPSHOT",
+      "eventId": "decision-agent.ag-ui.100.1.1800000000000",
+      "threadId": "100",
+      "runId": "run-100",
+      "sequence": 1,
+      "state": {
+        "humanInTheLoop": {
+          "capabilities": {
+            "confirmation": true,
+            "selection": true
+          }
+        }
+      }
+    }
   }
 }
 ```
@@ -45,11 +58,13 @@ MQ 外层保持不变，`payload.ag_ui` 必须是非空 Markdown 字符串。
 - `conversation_id`：当前会话 ID，必须由上游输入传入。
 - `turn_id`：会话侧预留的用户回合主键，必须由上游输入传入。
 - `message_id`：AI 输出消息 ID，可由上游提供；未提供时脚本用 Snowflake 生成。
-- `content`：纯文本摘要或降级展示文本。
 - `sequence`：同一 `turn_id + message_id` 下的输出序号。
-- `payload.ag_ui`：完整 Markdown 文本，不是对象。
+- `payload.ag_ui_event`：标准 AG-UI 事件对象，必须包含 `type/eventId/threadId/runId/sequence`。
+- `STATE_SNAPSHOT`：必须使用 `state`，禁止旧 `snapshot` 字段。
+- `TOOL_CALL_RESULT`：`result` 必须包含审批审计字段，例如 `approved` 与 `approvedBy`。
+- `HumanInTheLoopCapabilities`：状态快照中必须声明 `confirmation` 与 `selection` 双模式能力。
 
-同一 `message_id + sequence` 使用新的 `event_id` 时，表示该 Markdown 文本整体替换旧内容。
+同一 `message_id + sequence` 使用新的 `event_id` 时，表示该 AG-UI 事件整体替换旧输出。
 
 ## Markdown 生成规则
 
@@ -76,45 +91,43 @@ MQ 外层保持不变，`payload.ag_ui` 必须是非空 Markdown 字符串。
 
 ## 工作流
 
-1. 读取本技能并确认必需输入：`conversation_id`、`turn_id`、`sequence`，以及要展示的 Markdown 文本。
-2. 生成用户可见 Markdown 文本，并设置一句纯文本 `content` 摘要。
-3. 运行校验或生成脚本，脚本只补齐 MQ envelope、`event_id`、`occurred_at`、`message_id` 等外层字段。
+1. 读取本技能并确认必需输入：`conversation_id`、`turn_id`、`message_id`、`run_id`、`sequence` 与 AG-UI 事件类型。
+2. 生成 AG-UI 事件对象，状态快照使用 `state`，工具结果使用 `result`。
+3. 运行校验或生成脚本，脚本只补齐 MQ envelope、`event_id`、`occurred_at` 等外层字段。
 4. 需要发布时追加 `--publish --rabbitmq-url <url>`。
 5. MQ 发布失败必须停止当前业务动作，并输出脱敏失败说明。
 
 只生成本地消息 JSON：
 
 ```bash
-markdown='# 方案设计
-
-这里是 Markdown 内容。'
-
 python3 -X utf8 scripts/generate_ag_ui_mq_message.py \
-  --markdown "$markdown" \
+  --event-type STATE_SNAPSHOT \
   --conversation-id "100" \
   --turn-id "200" \
   --message-id "901" \
-  --content "方案设计已生成。" \
-  --sequence 1
+  --run-id "run-100" \
+  --sequence 1 \
+  --state-json '{"humanInTheLoop":{"capabilities":{"confirmation":true,"selection":true}}}'
 ```
 
-校验 Markdown 文本：
+校验消息 JSON：
 
 ```bash
 python3 -X utf8 scripts/validate_ag_ui_mq_message.py \
-  --markdown "$markdown"
+  --json "$message_json"
 ```
 
 生成、校验并发布：
 
 ```bash
 python3 -X utf8 scripts/generate_validate_publish_ag_ui_mq_message.py \
-  --markdown "$markdown" \
+  --event-type STATE_SNAPSHOT \
   --conversation-id "100" \
   --turn-id "200" \
   --message-id "901" \
-  --content "方案设计已生成。" \
+  --run-id "run-100" \
   --sequence 1 \
+  --state-json '{"humanInTheLoop":{"capabilities":{"confirmation":true,"selection":true}}}' \
   --publish \
   --rabbitmq-url amqp://guest:guest@localhost:5672/
 ```

@@ -13,38 +13,6 @@ class ConversationStatus(StrEnum):
     EXPIRED = "expired"
 
 
-class InteractionStatus(StrEnum):
-    IDLE = "idle"
-    THINKING = "thinking"
-    CLARIFYING = "clarifying"
-    EXECUTING = "executing"
-    COMPLETED = "completed"
-    ERROR = "error"
-
-
-IN_PROGRESS_INTERACTION_STATUSES: frozenset[InteractionStatus] = frozenset(
-    {
-        InteractionStatus.THINKING,
-        InteractionStatus.CLARIFYING,
-        InteractionStatus.EXECUTING,
-    }
-)
-
-
-ALLOWED_INTERACTION_TRANSITIONS: frozenset[tuple[InteractionStatus, InteractionStatus]] = frozenset(
-    {
-        (InteractionStatus.IDLE, InteractionStatus.THINKING),
-        (InteractionStatus.THINKING, InteractionStatus.CLARIFYING),
-        (InteractionStatus.CLARIFYING, InteractionStatus.THINKING),
-        (InteractionStatus.THINKING, InteractionStatus.EXECUTING),
-        (InteractionStatus.THINKING, InteractionStatus.ERROR),
-        (InteractionStatus.EXECUTING, InteractionStatus.COMPLETED),
-        (InteractionStatus.EXECUTING, InteractionStatus.ERROR),
-        (InteractionStatus.COMPLETED, InteractionStatus.IDLE),
-    }
-)
-
-
 ALLOWED_STATUS_TRANSITIONS: frozenset[tuple[ConversationStatus, ConversationStatus]] = frozenset(
     {
         (ConversationStatus.CREATED, ConversationStatus.ACTIVE),
@@ -61,7 +29,6 @@ ALLOWED_STATUS_TRANSITIONS: frozenset[tuple[ConversationStatus, ConversationStat
 class Conversation:
     conversation_id: int
     status: ConversationStatus
-    interaction_status: InteractionStatus = InteractionStatus.IDLE
     owner_user_id: str = ""
     title: str = ""
     summary: str | None = None
@@ -71,7 +38,7 @@ class Conversation:
     retention_policy: str = "conversation_default_v1"
     legal_hold: bool = False
     last_active_time: int = 0
-    active_turn_id: int | None = None
+    active_run_id: str | None = None
     archived_time: int | None = None
     archived_by: str | None = None
     archive_reason: str | None = None
@@ -85,17 +52,12 @@ class Conversation:
             raise DomainError(ErrorReason.INVALID_STATUS_TRANSITION)
         self.status = target
 
-    def transition_interaction_to(self, target: InteractionStatus) -> None:
-        if (self.interaction_status, target) not in ALLOWED_INTERACTION_TRANSITIONS:
-            raise DomainError(ErrorReason.INVALID_STATUS_TRANSITION)
-        self.interaction_status = target
-
     def ensure_user_message_allowed(self) -> None:
         if self.status is ConversationStatus.ARCHIVED:
             raise DomainError(ErrorReason.CONVERSATION_ARCHIVED)
         if self.status is ConversationStatus.EXPIRED:
             raise DomainError(ErrorReason.CONVERSATION_EXPIRED)
-        if self.interaction_status in IN_PROGRESS_INTERACTION_STATUSES:
+        if self.active_run_id is not None:
             raise DomainError(ErrorReason.CONVERSATION_BUSY)
 
     def ensure_agent_visible_content_allowed(self) -> None:

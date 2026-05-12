@@ -104,9 +104,9 @@ def _command_from_body(body: dict[str, Any]) -> DecisionAgentAgUiEventCommand:
     payload = body.get("payload")
     if not isinstance(payload, dict):
         raise ValueError("decision agent AG-UI payload must be an object")
-    ag_ui = payload.get("ag_ui")
-    if not isinstance(ag_ui, str) or not ag_ui.strip():
-        raise ValueError("decision agent AG-UI ag_ui must be a non-empty Markdown string")
+    ag_ui_event = payload.get("ag_ui_event") or payload.get("event")
+    if not isinstance(ag_ui_event, dict):
+        raise ValueError("decision agent AG-UI event must be an object")
     return DecisionAgentAgUiEventCommand(
         event_id=str(body["event_id"]),
         event_type=str(body["event_type"]),
@@ -114,9 +114,8 @@ def _command_from_body(body: dict[str, Any]) -> DecisionAgentAgUiEventCommand:
         conversation_id=int(payload["conversation_id"]),
         turn_id=_required_int(payload.get("turn_id")),
         message_id=int(payload["message_id"]),
-        content=str(payload["content"]),
         sequence=_required_int(payload.get("sequence")),
-        ag_ui=ag_ui,
+        ag_ui_event=ag_ui_event,
         trace_id=str(body.get("trace_id") or ""),
         correlation_id=str(body.get("correlation_id") or ""),
         occurred_time=_occurred_at_to_ms(body.get("occurred_at")),

@@ -587,7 +587,6 @@ def _candidate_selection_status_event_response(
         turn_id=None,
         event_type="message.updated",
         sequence=0,
-        interaction_status=conversation.interaction_status.value,
         message_status="responded",
         title="Candidate selection accepted",
         detail="Candidate selection accepted",

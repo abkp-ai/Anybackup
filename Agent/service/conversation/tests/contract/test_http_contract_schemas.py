@@ -50,17 +50,21 @@ def test_update_conversation_request_requires_title() -> None:
     assert update_request["properties"]["title"]["maxLength"] == 120
 
 
-def test_conversation_schemas_expose_turn_tracking_and_event_control_fields() -> None:
+def test_conversation_schemas_expose_active_run_without_legacy_interaction_state() -> None:
     components = create_app().openapi()["components"]["schemas"]
 
     conversation = components["ConversationResponse"]
-    assert "active_turn_id" in conversation["properties"]
+    assert "active_run_id" in conversation["properties"]
+    assert "has_active_run" in conversation["properties"]
+    assert "active_turn_id" not in conversation["properties"]
+    assert "interaction_status" not in conversation["properties"]
 
     message = components["ConversationMessageResponse"]
     assert "turn_id" in message["properties"]
 
     status_event = components["ConversationStatusEventResponse"]
     assert "turn_id" in status_event["properties"]
+    assert "interaction_status" not in status_event["properties"]
 
     events_response = components["ConversationEventsResponse"]
     assert set(events_response["required"]) >= {
@@ -68,5 +72,15 @@ def test_conversation_schemas_expose_turn_tracking_and_event_control_fields() ->
         "page",
         "latest_sequence",
         "recommended_poll_interval_ms",
-        "interaction_status",
     }
+    assert "interaction_status" not in events_response["properties"]
+
+
+def test_run_agent_input_uses_state_not_snapshot() -> None:
+    components = create_app().openapi()["components"]["schemas"]
+
+    run_input = components["RunAgentInput"]
+    assert "threadId" in run_input["properties"]
+    assert "runId" in run_input["properties"]
+    assert "state" in run_input["properties"]
+    assert "snapshot" not in run_input["properties"]

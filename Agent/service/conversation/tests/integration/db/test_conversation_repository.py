@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.domain.conversation import Conversation, ConversationStatus, InteractionStatus
+from app.domain.conversation import Conversation, ConversationStatus
 from app.infrastructure.persistence.sqlalchemy.models import Base
 from app.infrastructure.persistence.sqlalchemy.repositories import SqlAlchemyConversationRepository
 
@@ -20,7 +20,7 @@ async def test_conversation_repository_adds_and_loads_conversation() -> None:
             owner_user_id="user-001",
             title="DB restore",
             status=ConversationStatus.ACTIVE,
-            interaction_status=InteractionStatus.IDLE,
+            active_run_id=None,
             last_active_time=1_800_000_000_000,
             created_time=1_800_000_000_000,
             updated_time=1_800_000_000_000,

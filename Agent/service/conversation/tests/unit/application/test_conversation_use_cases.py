@@ -12,7 +12,7 @@ from app.application.models.conversation import (
     MqOutboxRecord,
 )
 from app.application.use_cases.conversation import SendUserMessageHandler
-from app.domain.conversation import ConversationStatus, InteractionStatus
+from app.domain.conversation import ConversationStatus
 from app.domain.message import MessageStatus
 
 
@@ -37,11 +37,11 @@ async def test_send_user_message_returns_existing_record_after_idempotency_race(
         owner_user_id="user-001",
         title="restore-db",
         status=ConversationStatus.ACTIVE,
-        interaction_status=InteractionStatus.THINKING,
         tags=(),
         created_time=1_800_000_000_000,
         updated_time=1_800_000_000_100,
         last_active_time=1_800_000_000_100,
+        active_run_id="9001",
     )
     existing_status_event = ConversationStatusEventRecord(
         status_event_id=9_101,
@@ -49,7 +49,6 @@ async def test_send_user_message_returns_existing_record_after_idempotency_race(
         message_id=9_001,
         event_type="message.created",
         sequence=2,
-        interaction_status=InteractionStatus.THINKING,
         message_status=MessageStatus.PERSISTED,
         title="Message created",
         detail="User message accepted",
@@ -62,7 +61,7 @@ async def test_send_user_message_returns_existing_record_after_idempotency_race(
     unit_of_work = FakeUnitOfWork(
         conversation=replace(
             existing_conversation,
-            interaction_status=InteractionStatus.IDLE,
+            active_run_id=None,
             updated_time=1_800_000_000_000,
             last_active_time=1_800_000_000_000,
         ),
@@ -90,7 +89,7 @@ async def test_send_user_message_returns_existing_record_after_idempotency_race(
     assert result is not None
     assert result.message.message_id == 9_001
     assert result.status_event.status_event_id == 9_101
-    assert result.conversation.interaction_status is InteractionStatus.THINKING
+    assert result.conversation.active_run_id == "9001"
     assert unit_of_work.rollback_calls == 1
 
 

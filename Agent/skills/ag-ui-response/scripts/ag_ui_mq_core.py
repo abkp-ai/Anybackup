@@ -35,7 +35,19 @@ _ALLOWED_MESSAGE_FIELDS = frozenset(
     {"event_id", "event_type", "occurred_at", "source_service", "payload"}
 )
 _ALLOWED_PAYLOAD_FIELDS = frozenset(
-    {"conversation_id", "turn_id", "message_id", "content", "sequence", "ag_ui"}
+    {"conversation_id", "turn_id", "message_id", "sequence", "ag_ui_event"}
+)
+_ALLOWED_AG_UI_EVENT_TYPES = frozenset(
+    {
+        "RUN_STARTED",
+        "RUN_FINISHED",
+        "RUN_ERROR",
+        "STATE_SNAPSHOT",
+        "STATE_DELTA",
+        "ACTIVITY_SNAPSHOT",
+        "ACTIVITY_DELTA",
+        "TOOL_CALL_RESULT",
+    }
 )
 _SENSITIVE_MARKDOWN_MARKERS = (
     "完整内部推理链",
@@ -234,6 +246,94 @@ def generate_valid_message_from_markdown(
     )
 
 
+def generate_valid_message_from_event(
+    *,
+    event_type: object,
+    conversation_id: object,
+    turn_id: object,
+    message_id: object,
+    run_id: object,
+    sequence: object,
+    state: dict[str, Any] | None = None,
+    result: dict[str, Any] | None = None,
+    event_id: object | None = None,
+    occurred_at: object | None = None,
+    source_service: object = DEFAULT_SOURCE_SERVICE,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    conversation_id_text = _coerce_non_empty_id(conversation_id, "conversation_id", errors)
+    turn_id_text = _coerce_non_empty_id(turn_id, "turn_id", errors)
+    message_id_text = _coerce_non_empty_id(message_id, "message_id", errors)
+    run_id_text = _coerce_non_empty_string(run_id, "run_id", errors)
+    sequence_value = _coerce_positive_int(sequence, "sequence", errors)
+    event_type_text = _coerce_non_empty_string(event_type, "event_type", errors)
+    source_service_text = _coerce_non_empty_string(source_service, "source_service", errors)
+    current_ms = _current_time_ms() if now_ms is None else now_ms
+    if isinstance(current_ms, bool) or not isinstance(current_ms, int) or current_ms < 0:
+        errors.append("now_ms must be a non-negative integer when provided")
+
+    occurred_at_text: str | None
+    if occurred_at is None:
+        occurred_at_text = _ms_to_iso(current_ms if isinstance(current_ms, int) else 0)
+    else:
+        occurred_at_text = _coerce_non_empty_string(occurred_at, "occurred_at", errors)
+        if occurred_at_text is not None:
+            _validate_iso_timestamp(occurred_at_text, "occurred_at", errors)
+
+    if event_type_text is not None and event_type_text not in _ALLOWED_AG_UI_EVENT_TYPES:
+        errors.append("event_type is not supported by the AG-UI response skill")
+
+    if errors:
+        raise ContractValidationError(errors)
+
+    assert conversation_id_text is not None
+    assert turn_id_text is not None
+    assert message_id_text is not None
+    assert run_id_text is not None
+    assert sequence_value is not None
+    assert event_type_text is not None
+    assert source_service_text is not None
+    assert occurred_at_text is not None
+
+    event_id_text = (
+        _coerce_non_empty_string(event_id, "event_id", errors)
+        if event_id is not None
+        else f"decision-agent.ag-ui.{conversation_id_text}.{sequence_value}.{current_ms}"
+    )
+    if errors:
+        raise ContractValidationError(errors)
+    assert event_id_text is not None
+
+    ag_ui_event: dict[str, Any] = {
+        "type": event_type_text,
+        "eventId": event_id_text,
+        "threadId": conversation_id_text,
+        "runId": run_id_text,
+        "sequence": sequence_value,
+    }
+    if event_type_text == "STATE_SNAPSHOT":
+        ag_ui_event["state"] = state or {}
+    if event_type_text == "TOOL_CALL_RESULT":
+        ag_ui_event["result"] = result or {}
+
+    message = {
+        "event_id": event_id_text,
+        "event_type": DEFAULT_MESSAGE_TYPE,
+        "occurred_at": occurred_at_text,
+        "source_service": source_service_text,
+        "payload": {
+            "conversation_id": conversation_id_text,
+            "turn_id": turn_id_text,
+            "message_id": message_id_text,
+            "sequence": sequence_value,
+            "ag_ui_event": ag_ui_event,
+        },
+    }
+    validate_message(message)
+    return message
+
+
 def validate_draft(draft: object) -> dict[str, Any]:
     del draft
     raise ContractValidationError(
@@ -273,13 +373,80 @@ def validate_message(message: object) -> dict[str, Any]:
         )
         _expect_non_empty_string(payload.get("turn_id"), "message.payload.turn_id", errors)
         _expect_non_empty_string(payload.get("message_id"), "message.payload.message_id", errors)
-        _expect_non_empty_string(payload.get("content"), "message.payload.content", errors)
         _expect_positive_int(payload.get("sequence"), "message.payload.sequence", errors)
-        _validate_markdown_collect(payload.get("ag_ui"), "message.payload.ag_ui", errors)
+        _validate_ag_ui_event(
+            payload.get("ag_ui_event"),
+            conversation_id=payload.get("conversation_id"),
+            sequence=payload.get("sequence"),
+            errors=errors,
+        )
 
     if errors:
         raise ContractValidationError(errors)
     return deepcopy(message)
+
+
+def _validate_ag_ui_event(
+    event: object,
+    *,
+    conversation_id: object,
+    sequence: object,
+    errors: list[str],
+) -> None:
+    if not isinstance(event, dict):
+        errors.append("message.payload.ag_ui_event must be an object")
+        return
+    _reject_wire_forbidden_fields(event, "message.payload.ag_ui_event", errors)
+    event_type = event.get("type")
+    if event_type not in _ALLOWED_AG_UI_EVENT_TYPES:
+        errors.append("message.payload.ag_ui_event.type is not supported")
+    _expect_non_empty_string(event.get("eventId"), "message.payload.ag_ui_event.eventId", errors)
+    if str(event.get("threadId")) != str(conversation_id):
+        errors.append("message.payload.ag_ui_event.threadId must match conversation_id")
+    _expect_non_empty_string(event.get("runId"), "message.payload.ag_ui_event.runId", errors)
+    if event.get("sequence") != sequence:
+        errors.append("message.payload.ag_ui_event.sequence must match payload.sequence")
+    if event_type in {"RUN_STARTED", "RUN_FINISHED", "RUN_ERROR"}:
+        _expect_non_empty_string(
+            event.get("threadId"), "message.payload.ag_ui_event.threadId", errors
+        )
+    if event_type == "STATE_SNAPSHOT":
+        state = event.get("state")
+        if not isinstance(state, dict):
+            errors.append("STATE_SNAPSHOT must contain state object")
+        else:
+            _validate_hitl_capabilities(state, errors)
+    if event_type == "TOOL_CALL_RESULT":
+        result = event.get("result")
+        if not isinstance(result, dict):
+            errors.append("TOOL_CALL_RESULT.result must be an object")
+        elif "approved" not in result or "approvedBy" not in result:
+            errors.append("TOOL_CALL_RESULT.result must contain approved and approvedBy")
+
+
+def _validate_hitl_capabilities(state: dict[str, Any], errors: list[str]) -> None:
+    hitl = state.get("humanInTheLoop")
+    capabilities = hitl.get("capabilities") if isinstance(hitl, dict) else None
+    if not isinstance(capabilities, dict):
+        errors.append("STATE_SNAPSHOT.state must declare HumanInTheLoopCapabilities")
+        return
+    if capabilities.get("confirmation") is not True or capabilities.get("selection") is not True:
+        errors.append(
+            "HumanInTheLoopCapabilities must declare confirmation and selection modes"
+        )
+
+
+def _reject_wire_forbidden_fields(value: object, prefix: str, errors: list[str]) -> None:
+    if isinstance(value, dict):
+        if "snapshot" in value:
+            errors.append(f"{prefix}.snapshot is not supported; use state")
+        if "rich_payload" in value:
+            errors.append(f"{prefix}.rich_payload is not an SSE wire-format field")
+        for key, child in value.items():
+            _reject_wire_forbidden_fields(child, f"{prefix}.{key}", errors)
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _reject_wire_forbidden_fields(child, f"{prefix}[{index}]", errors)
 
 
 async def publish_validated_message(

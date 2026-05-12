@@ -73,7 +73,6 @@ def event_list_to_response(result: ConversationStatusEventListResult) -> Convers
         page=page_to_response(result.page),
         latest_sequence=result.latest_sequence,
         recommended_poll_interval_ms=result.recommended_poll_interval_ms,
-        interaction_status=result.interaction_status.value,
     )
 
 
@@ -286,10 +285,8 @@ def conversation_to_response(record: ConversationRecord) -> ConversationResponse
         scenario_binding=record.scenario_binding,
         tags=list(record.tags),
         latest_message_summary=record.latest_message_summary,
-        active_turn_id=(
-            str(record.active_turn_id) if record.active_turn_id is not None else None
-        ),
-        interaction_status=record.interaction_status.value,
+        active_run_id=record.active_run_id,
+        has_active_run=record.active_run_id is not None,
         created_at=_ms_to_iso(record.created_time),
         updated_at=_ms_to_iso(record.updated_time),
         last_active_at=_ms_to_iso(record.last_active_time),
@@ -337,9 +334,6 @@ def status_event_to_response(
         turn_id=str(record.turn_id) if record.turn_id is not None else None,
         event_type=cast(Any, record.event_type),
         sequence=record.sequence,
-        interaction_status=(
-            record.interaction_status.value if record.interaction_status is not None else None
-        ),
         message_status=record.message_status.value if record.message_status is not None else None,
         title=record.title,
         detail=record.detail,

@@ -1,6 +1,6 @@
 import pytest
 
-from app.domain.conversation import Conversation, ConversationStatus, InteractionStatus
+from app.domain.conversation import Conversation, ConversationStatus
 from app.domain.shared.errors import DomainError, ErrorReason
 
 
@@ -23,21 +23,11 @@ def test_archived_and_expired_conversations_reject_user_writes(
     assert exc_info.value.reason is expected_reason
 
 
-@pytest.mark.parametrize(
-    "interaction_status",
-    [
-        InteractionStatus.THINKING,
-        InteractionStatus.CLARIFYING,
-        InteractionStatus.EXECUTING,
-    ],
-)
-def test_in_progress_interaction_rejects_new_user_message(
-    interaction_status: InteractionStatus,
-) -> None:
+def test_active_run_rejects_new_user_message() -> None:
     conversation = Conversation(
         conversation_id=1,
         status=ConversationStatus.ACTIVE,
-        interaction_status=interaction_status,
+        active_run_id="run-1",
     )
 
     with pytest.raises(DomainError) as exc_info:
@@ -50,7 +40,7 @@ def test_idle_active_conversation_allows_user_message() -> None:
     conversation = Conversation(
         conversation_id=1,
         status=ConversationStatus.ACTIVE,
-        interaction_status=InteractionStatus.IDLE,
+        active_run_id=None,
     )
 
     conversation.ensure_user_message_allowed()
@@ -60,7 +50,7 @@ def test_active_conversation_allows_metadata_update_during_in_progress_interacti
     conversation = Conversation(
         conversation_id=1,
         status=ConversationStatus.ACTIVE,
-        interaction_status=InteractionStatus.EXECUTING,
+        active_run_id="run-1",
     )
 
     conversation.ensure_metadata_update_allowed()

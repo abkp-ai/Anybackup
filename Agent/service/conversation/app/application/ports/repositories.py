@@ -128,6 +128,16 @@ class StatusEventRepository(Protocol):
     ) -> tuple[tuple[ConversationStatusEventRecord, ...], Page]:
         raise NotImplementedError
 
+    async def list_ag_ui_after_sequence(
+        self,
+        conversation_id: int,
+        *,
+        run_id: str,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[ConversationStatusEventRecord, ...]:
+        raise NotImplementedError
+
 
 class MqOutboxRepository(Protocol):
     async def add(self, event: MqOutboxRecord) -> None:

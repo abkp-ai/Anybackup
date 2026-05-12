@@ -12,11 +12,7 @@ from app.application.ports.id_generator import IdGenerator
 from app.application.ports.locking import GlobalLock
 from app.application.ports.unit_of_work import UnitOfWork
 from app.application.use_cases.access import ensure_conversation_owner
-from app.domain.conversation import (
-    IN_PROGRESS_INTERACTION_STATUSES,
-    ConversationStatus,
-    InteractionStatus,
-)
+from app.domain.conversation import ConversationStatus
 from app.domain.shared.errors import DomainError, ErrorReason
 
 logger = logging.getLogger(__name__)
@@ -59,7 +55,7 @@ class ArchiveConversationHandler:
             ensure_conversation_owner(conversation, user)
             if conversation.legal_hold:
                 raise DomainError(ErrorReason.CONVERSATION_BUSY)
-            if conversation.interaction_status in IN_PROGRESS_INTERACTION_STATUSES:
+            if conversation.active_run_id is not None:
                 raise DomainError(ErrorReason.CONVERSATION_BUSY)
             now_ms = _current_time_ms()
             archived = replace(
@@ -117,7 +113,6 @@ class RestoreConversationHandler:
             restored = replace(
                 conversation,
                 status=ConversationStatus.ACTIVE,
-                interaction_status=InteractionStatus.IDLE,
                 archived_time=None,
                 archived_by=None,
                 archive_reason=None,
@@ -171,7 +166,7 @@ class SetLegalHoldHandler:
                 unit_of_work,
                 id_generator=self._id_generator,
                 conversation=updated,
-                event_type="interaction.status_changed",
+                event_type="conversation.legal_hold_updated",
                 now_ms=now_ms,
                 title="Legal hold updated",
                 detail=reason,
@@ -287,7 +282,6 @@ async def _add_status_event(
             conversation_id=conversation.conversation_id,
             event_type=event_type,
             sequence=sequence,
-            interaction_status=conversation.interaction_status,
             title=title,
             detail=detail,
             payload=payload,

@@ -21,12 +21,7 @@ from app.application.models.conversation import (
 from app.application.ports.id_generator import IdGenerator
 from app.application.ports.unit_of_work import UnitOfWork
 from app.application.use_cases.access import ensure_conversation_owner
-from app.domain.conversation import (
-    IN_PROGRESS_INTERACTION_STATUSES,
-    Conversation,
-    ConversationStatus,
-    InteractionStatus,
-)
+from app.domain.conversation import Conversation, ConversationStatus
 from app.domain.message import MessageStatus
 from app.domain.shared.errors import DomainError, ErrorReason
 from app.domain.shared.redaction import RedactionAction, RedactionPolicy
@@ -93,12 +88,11 @@ class CreateConversationHandler:
                 scenario_binding=command.scenario_binding,
                 tags=command.tags,
                 status=ConversationStatus.ACTIVE,
-                interaction_status=InteractionStatus.THINKING,
                 latest_message_summary=command.initial_message_content[:200],
                 retention_policy="conversation_default_v1",
                 legal_hold=False,
                 last_active_time=now_ms,
-                active_turn_id=turn_id,
+                active_run_id=str(turn_id),
                 created_time=now_ms,
                 updated_time=now_ms,
             )
@@ -124,7 +118,6 @@ class CreateConversationHandler:
                 turn_id=turn_id,
                 event_type="message.created",
                 sequence=1,
-                interaction_status=InteractionStatus.THINKING,
                 message_status=MessageStatus.PERSISTED,
                 title="Message created",
                 detail="User message accepted",
@@ -270,10 +263,7 @@ class SendUserMessageHandler:
                     raise DomainError(ErrorReason.CONVERSATION_ARCHIVED)
                 if conversation.status is ConversationStatus.EXPIRED:
                     raise DomainError(ErrorReason.CONVERSATION_EXPIRED)
-                if conversation.interaction_status in {
-                    InteractionStatus.THINKING,
-                    InteractionStatus.EXECUTING,
-                }:
+                if conversation.active_run_id is not None:
                     raise DomainError(ErrorReason.CONVERSATION_BUSY)
             else:
                 _conversation_guard(conversation).ensure_user_message_allowed()
@@ -290,9 +280,8 @@ class SendUserMessageHandler:
 
             updated_conversation = replace(
                 conversation,
-                interaction_status=InteractionStatus.THINKING,
                 last_active_time=now_ms,
-                active_turn_id=turn_id,
+                active_run_id=str(turn_id),
                 updated_time=now_ms,
             )
             message = ConversationMessageRecord(
@@ -335,7 +324,6 @@ class SendUserMessageHandler:
                 turn_id=turn_id,
                 event_type="message.created",
                 sequence=sequence,
-                interaction_status=InteractionStatus.THINKING,
                 message_status=MessageStatus.PERSISTED,
                 title="Message created",
                 detail="User message accepted",
@@ -508,9 +496,8 @@ class ListConversationEventsHandler:
                 page=page,
                 latest_sequence=latest_sequence,
                 recommended_poll_interval_ms=_recommended_poll_interval_ms(
-                    conversation.interaction_status
+                    conversation.active_run_id
                 ),
-                interaction_status=conversation.interaction_status,
             )
 
 
@@ -615,9 +602,8 @@ def _conversation_guard(record: ConversationRecord) -> Conversation:
         owner_user_id=record.owner_user_id,
         title=record.title,
         status=record.status,
-        interaction_status=record.interaction_status,
         last_active_time=record.last_active_time,
-        active_turn_id=record.active_turn_id,
+        active_run_id=record.active_run_id,
         created_time=record.created_time,
         updated_time=record.updated_time,
     )
@@ -639,7 +625,7 @@ def _message_snapshot(message: ConversationMessageRecord) -> dict[str, str | Non
     }
 
 
-def _recommended_poll_interval_ms(interaction_status: InteractionStatus) -> int:
-    if interaction_status in IN_PROGRESS_INTERACTION_STATUSES:
+def _recommended_poll_interval_ms(active_run_id: str | None) -> int:
+    if active_run_id is not None:
         return 1000
     return 5000

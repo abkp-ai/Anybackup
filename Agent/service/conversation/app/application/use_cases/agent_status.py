@@ -11,7 +11,6 @@ from app.application.models.conversation import (
 )
 from app.application.ports.id_generator import IdGenerator
 from app.application.ports.unit_of_work import UnitOfWork
-from app.domain.conversation import InteractionStatus
 from app.domain.message import ConversationMessage, MessageStatus
 from app.domain.shared.errors import DomainError, ErrorReason
 
@@ -85,8 +84,7 @@ class CoreAgentStatusEventHandler:
             if event_kind == "accepted":
                 if message.status in {MessageStatus.RESPONDED, MessageStatus.FAILED}:
                     target_message = message
-                    target_interaction_status = conversation.interaction_status
-                    target_active_turn_id = conversation.active_turn_id
+                    target_active_run_id = conversation.active_run_id
                     event_type = "message.updated"
                     title = "Core Agent accepted"
                     detail = (
@@ -100,16 +98,14 @@ class CoreAgentStatusEventHandler:
                     }
                 else:
                     target_message = _transition_message(message, MessageStatus.PROCESSING, now_ms)
-                    target_interaction_status = InteractionStatus.EXECUTING
-                    target_active_turn_id = turn_id
+                    target_active_run_id = _core_run_id(command, turn_id)
                     event_type = "message.updated"
                     title = "Core Agent accepted"
                     detail = "Core Agent accepted the user message"
                     payload = _accepted_payload(command)
             elif event_kind == "completed":
                 target_message = _transition_message(message, MessageStatus.RESPONDED, now_ms)
-                target_interaction_status = InteractionStatus.COMPLETED
-                target_active_turn_id = None
+                target_active_run_id = None
                 event_type = "message.updated"
                 title = "Core Agent completed"
                 detail = "Core Agent run completed"
@@ -120,8 +116,7 @@ class CoreAgentStatusEventHandler:
                     _transition_message(message, MessageStatus.FAILED, now_ms),
                     error_code=error_payload["error_code"],
                 )
-                target_interaction_status = InteractionStatus.ERROR
-                target_active_turn_id = None
+                target_active_run_id = None
                 event_type = "error"
                 title = "Core Agent failed"
                 detail = str(error_payload.get("error_message") or "Core Agent returned failure")
@@ -131,12 +126,10 @@ class CoreAgentStatusEventHandler:
 
             target_conversation = (
                 conversation
-                if target_interaction_status == conversation.interaction_status
-                and target_active_turn_id == conversation.active_turn_id
+                if target_active_run_id == conversation.active_run_id
                 else replace(
                     conversation,
-                    interaction_status=target_interaction_status,
-                    active_turn_id=target_active_turn_id,
+                    active_run_id=target_active_run_id,
                     updated_time=now_ms,
                     last_active_time=now_ms,
                 )
@@ -149,7 +142,6 @@ class CoreAgentStatusEventHandler:
                 turn_id=turn_id,
                 event_type=event_type,
                 sequence=sequence,
-                interaction_status=target_interaction_status,
                 message_status=target_message.status,
                 title=title,
                 detail=detail,
@@ -164,44 +156,23 @@ class CoreAgentStatusEventHandler:
                 created_time=now_ms,
                 updated_time=now_ms,
             )
-            interaction_event = _interaction_status_event(
-                id_generator=self._id_generator,
-                command=command,
-                turn_id=turn_id,
-                sequence=sequence + 1,
-                previous_interaction_status=conversation.interaction_status,
-                previous_active_turn_id=conversation.active_turn_id,
-                target_interaction_status=target_interaction_status,
-                target_active_turn_id=target_active_turn_id,
-                message_status=target_message.status,
-                payload=payload,
-                detail=detail,
-                now_ms=now_ms,
-            )
-
             if target_conversation != conversation:
                 await unit_of_work.conversations.update_record(target_conversation)
             if target_message != message:
                 await unit_of_work.messages.update(target_message)
             await unit_of_work.status_events.add(primary_event)
-            if interaction_event is not None:
-                await unit_of_work.status_events.add(interaction_event)
             logger.info(
                 "core_agent_status_event_persisted",
                 extra={
                     "event_id": command.event_id,
-                    "status_event_id": (
-                        interaction_event.status_event_id
-                        if interaction_event is not None
-                        else primary_event.status_event_id
-                    ),
+                    "status_event_id": primary_event.status_event_id,
                     "message_status": target_message.status.value,
-                    "interaction_status": target_interaction_status.value,
+                    "active_run_id": target_active_run_id,
                 },
             )
             return CoreAgentStatusEventResult(
                 idempotent=False,
-                status_event=interaction_event or primary_event,
+                status_event=primary_event,
             )
 
 
@@ -244,6 +215,14 @@ def _completed_payload(command: CoreAgentStatusEventCommand) -> dict[str, Any]:
     }
 
 
+def _core_run_id(command: CoreAgentStatusEventCommand, fallback_turn_id: int | None) -> str | None:
+    accepted = _section(command.payload, "accepted")
+    run_id = accepted.get("core_agent_run_id")
+    if isinstance(run_id, str) and run_id:
+        return run_id
+    return str(fallback_turn_id) if fallback_turn_id is not None else None
+
+
 def _error_payload(command: CoreAgentStatusEventCommand, section_name: str) -> dict[str, Any]:
     section = _section(command.payload, section_name)
     fallback_code = "CORE_AGENT_REJECTED" if section_name == "rejected" else "CORE_AGENT_FAILED"
@@ -274,8 +253,8 @@ async def _resolve_target_message(
     candidate_ids = []
     if command.message_id is not None:
         candidate_ids.append(command.message_id)
-    if conversation.active_turn_id is not None:
-        candidate_ids.append(conversation.active_turn_id)
+    if conversation.active_run_id is not None and conversation.active_run_id.isdigit():
+        candidate_ids.append(int(conversation.active_run_id))
 
     seen: set[int] = set()
     for message_id in candidate_ids:
@@ -301,52 +280,6 @@ async def _resolve_target_message(
         }:
             return message
     return None
-
-
-def _interaction_status_event(
-    *,
-    id_generator: IdGenerator,
-    command: CoreAgentStatusEventCommand,
-    turn_id: int | None,
-    sequence: int,
-    previous_interaction_status: InteractionStatus,
-    previous_active_turn_id: int | None,
-    target_interaction_status: InteractionStatus,
-    target_active_turn_id: int | None,
-    message_status: MessageStatus,
-    payload: dict[str, Any],
-    detail: str,
-    now_ms: int,
-) -> ConversationStatusEventRecord | None:
-    if (
-        previous_interaction_status == target_interaction_status
-        and previous_active_turn_id == target_active_turn_id
-    ):
-        return None
-    event_payload = {
-        "core_event_id": command.event_id,
-        "core_event_type": command.event_type,
-        "core_event_version": command.event_version,
-        **payload,
-        "active_turn_id": str(target_active_turn_id) if target_active_turn_id is not None else None,
-    }
-    return ConversationStatusEventRecord(
-        status_event_id=id_generator.next_id(),
-        conversation_id=command.conversation_id,
-        message_id=None,
-        turn_id=turn_id,
-        event_type="interaction.status_changed",
-        sequence=sequence,
-        interaction_status=target_interaction_status,
-        message_status=message_status,
-        title="Interaction status changed",
-        detail=detail,
-        payload=event_payload,
-        trace_id=command.trace_id,
-        correlation_id=command.correlation_id,
-        created_time=now_ms,
-        updated_time=now_ms,
-    )
 
 
 def _current_time_ms() -> int:

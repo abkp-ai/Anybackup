@@ -111,15 +111,8 @@ class ConversationResponse(StrictSchema):
     scenario_binding: dict[str, object] | None = None
     tags: list[str]
     latest_message_summary: str | None = None
-    active_turn_id: str | None = None
-    interaction_status: Literal[
-        "idle",
-        "thinking",
-        "clarifying",
-        "executing",
-        "completed",
-        "error",
-    ]
+    active_run_id: str | None = None
+    has_active_run: bool
     created_at: str
     updated_at: str
     last_active_at: str
@@ -187,17 +180,26 @@ class ConversationStatusEventResponse(StrictSchema):
     event_type: Literal[
         "message.created",
         "message.updated",
-        "interaction.status_changed",
+        "RUN_STARTED",
+        "RUN_FINISHED",
+        "RUN_ERROR",
+        "THINKING_START",
+        "THINKING_END",
+        "STATE_SNAPSHOT",
+        "STATE_DELTA",
+        "ACTIVITY_SNAPSHOT",
+        "ACTIVITY_DELTA",
+        "TOOL_CALL_RESULT",
         "context.updated",
         "reasoning_trace.created",
         "rich_content.created",
+        "rich_content.updated",
         "conversation.archived",
         "conversation.restored",
         "conversation.expired",
         "error",
     ]
     sequence: int
-    interaction_status: str | None = None
     message_status: str | None = None
     title: str | None = None
     detail: str | None = None
@@ -243,14 +245,6 @@ class ConversationEventsResponse(StrictSchema):
     page: PageMeta
     latest_sequence: int = Field(ge=0)
     recommended_poll_interval_ms: int = Field(ge=0, le=60_000)
-    interaction_status: Literal[
-        "idle",
-        "thinking",
-        "clarifying",
-        "executing",
-        "completed",
-        "error",
-    ]
 
 
 class ConversationContextSnapshotResponse(StrictSchema):

@@ -39,7 +39,6 @@ class ConversationModel(TimestampColumnsMixin, Base):
     f_title: Mapped[str] = mapped_column(String(120), nullable=False)
     f_display_summary: Mapped[str | None] = mapped_column(String(500), nullable=True)
     f_status: Mapped[str] = mapped_column(String(32), nullable=False)
-    f_interaction_status: Mapped[str] = mapped_column(String(32), nullable=False)
     f_scenario_binding: Mapped[dict[str, Any] | None] = mapped_column(JSON_DOCUMENT, nullable=True)
     f_tags: Mapped[list[str] | None] = mapped_column(JSON_DOCUMENT, nullable=True)
     f_retention_policy: Mapped[str] = mapped_column(
@@ -49,7 +48,7 @@ class ConversationModel(TimestampColumnsMixin, Base):
     )
     f_legal_hold: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     f_last_active_time: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    f_active_turn_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    f_active_run_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     f_archived_time: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     f_archived_by: Mapped[str | None] = mapped_column(String(16), nullable=True)
     f_archive_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)

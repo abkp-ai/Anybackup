@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.application.commands.agent_events import CoreAgentStatusEventCommand
 from app.application.use_cases.agent_status import CoreAgentStatusEventHandler
-from app.domain.conversation import InteractionStatus
 from app.domain.message import MessageStatus
 from app.infrastructure.persistence.sqlalchemy.models import (
     Base,
@@ -57,15 +56,13 @@ async def test_accepted_event_marks_user_message_processing(database_url: str) -
     assert result.idempotent is False
     assert message.f_status == MessageStatus.PROCESSING.value
     assert message.f_turn_id == 200
-    assert conversation.f_interaction_status == InteractionStatus.EXECUTING.value
-    assert conversation.f_active_turn_id == 200
+    assert conversation.f_active_run_id == "200"
     event = await _latest_event(database_url, 100)
-    assert event_types[-2:] == ["message.updated", "interaction.status_changed"]
-    assert event.f_event_type == "interaction.status_changed"
-    assert event.f_sequence == 3
+    assert event_types[-1:] == ["message.updated"]
+    assert event.f_event_type == "message.updated"
+    assert event.f_sequence == 2
     assert event.f_turn_id == 200
     assert event.f_payload["core_event_id"] == "core-accepted-001"
-    assert event.f_payload["active_turn_id"] == "200"
 
 
 @pytest.mark.asyncio
@@ -89,11 +86,10 @@ async def test_rejected_non_retryable_event_marks_message_failed(database_url: s
     event_types = await _event_types(database_url, 100)
     assert message.f_status == MessageStatus.FAILED.value
     assert message.f_error_code == "CORE_AGENT_REJECTED"
-    assert conversation.f_interaction_status == InteractionStatus.ERROR.value
-    assert conversation.f_active_turn_id is None
+    assert conversation.f_active_run_id is None
     event = await _latest_event(database_url, 100)
-    assert event_types[-2:] == ["error", "interaction.status_changed"]
-    assert event.f_event_type == "interaction.status_changed"
+    assert event_types[-1:] == ["error"]
+    assert event.f_event_type == "error"
     assert event.f_turn_id == 200
     assert event.f_payload["retryable"] is False
     assert event.f_payload["error_code"] == "CORE_AGENT_REJECTED"
@@ -124,15 +120,13 @@ async def test_completed_event_closes_turn_without_ag_ui_content(
     event = await _latest_event(database_url, 100)
     assert result.idempotent is False
     assert message.f_status == MessageStatus.RESPONDED.value
-    assert conversation.f_interaction_status == InteractionStatus.COMPLETED.value
-    assert conversation.f_active_turn_id is None
-    assert event_types[-2:] == ["message.updated", "interaction.status_changed"]
-    assert event.f_event_type == "interaction.status_changed"
-    assert event.f_message_id is None
+    assert conversation.f_active_run_id is None
+    assert event_types[-1:] == ["message.updated"]
+    assert event.f_event_type == "message.updated"
+    assert event.f_message_id == 200
     assert event.f_turn_id == 200
     assert event.f_payload["core_event_id"] == "core-completed-001"
     assert event.f_payload["core_event_type"] == "core_agent.run.completed"
-    assert event.f_payload["active_turn_id"] is None
     assert event.f_payload["content"] == "completed"
 
 
@@ -153,7 +147,7 @@ async def test_failed_retryable_event_records_retryable_failure(database_url: st
     event = await _latest_event(database_url, 100)
     assert message.f_status == MessageStatus.FAILED.value
     assert message.f_error_code == "CORE_AGENT_FAILED"
-    assert event.f_event_type == "interaction.status_changed"
+    assert event.f_event_type == "error"
     assert event.f_turn_id == 200
     assert event.f_payload["retryable"] is False
     assert event.f_payload["error_code"] == "CORE_AGENT_FAILED"
@@ -175,7 +169,7 @@ async def test_duplicate_core_event_is_idempotent(database_url: str) -> None:
     status_event_count = await _status_event_count(database_url)
     assert first.idempotent is False
     assert second.idempotent is True
-    assert status_event_count == 3
+    assert status_event_count == 2
 
 
 @pytest.mark.asyncio
@@ -199,7 +193,7 @@ async def test_late_accepted_event_does_not_regress_responded_message(database_u
     conversation = await _get_conversation(database_url, 100)
     event = await _latest_event(database_url, 100)
     assert message.f_status == MessageStatus.RESPONDED.value
-    assert conversation.f_interaction_status == InteractionStatus.COMPLETED.value
+    assert conversation.f_active_run_id is None
     assert event.f_payload["core_event_id"] == "core-accepted-late"
     assert event.f_payload["message_status"] == "responded"
 
@@ -297,9 +291,8 @@ async def _insert_conversation_with_message(
                 f_title="restore backup",
                 f_display_summary=None,
                 f_status="active",
-                f_interaction_status=interaction_status,
-                f_active_turn_id=(
-                    200
+                f_active_run_id=(
+                    "200"
                     if interaction_status in {"thinking", "executing", "clarifying"}
                     else None
                 ),

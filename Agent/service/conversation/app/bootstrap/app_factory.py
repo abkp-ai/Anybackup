@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from app.bootstrap.container import Container
 from app.bootstrap.settings import Settings
 from app.infrastructure.observability.logging import configure_structured_logging
+from app.interfaces.http.ag_ui_sse.router import router as ag_ui_sse_router
 from app.interfaces.http.v1.error_handlers import register_error_handlers
 from app.interfaces.http.v1.middleware import register_request_context_middleware
 from app.interfaces.http.v1.router import router as http_v1_router
@@ -37,6 +38,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_request_context_middleware(app)
     register_error_handlers(app)
     app.include_router(http_v1_router, prefix=settings.api_prefix)
+    app.include_router(ag_ui_sse_router, prefix=settings.api_prefix)
 
     @app.get("/healthz", tags=["health"])
     async def healthz() -> dict[str, str]:

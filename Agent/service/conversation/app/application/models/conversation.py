@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.domain.conversation import ConversationStatus, InteractionStatus
+from app.domain.conversation import ConversationStatus
 from app.domain.message import MessageStatus
 
 
@@ -57,7 +57,6 @@ class ConversationRecord:
     owner_user_id: str
     title: str
     status: ConversationStatus
-    interaction_status: InteractionStatus
     tags: tuple[str, ...]
     created_time: int
     updated_time: int
@@ -72,7 +71,7 @@ class ConversationRecord:
     archive_reason: str | None = None
     expires_time: int | None = None
     expired_time: int | None = None
-    active_turn_id: int | None = None
+    active_run_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +104,6 @@ class ConversationStatusEventRecord:
     updated_time: int
     message_id: int | None = None
     turn_id: int | None = None
-    interaction_status: InteractionStatus | None = None
     message_status: MessageStatus | None = None
     title: str | None = None
     detail: str | None = None
@@ -153,7 +151,6 @@ class ConversationStatusEventListResult:
     page: Page
     latest_sequence: int = 0
     recommended_poll_interval_ms: int = 1000
-    interaction_status: InteractionStatus = InteractionStatus.IDLE
 
 
 @dataclass(frozen=True, slots=True)

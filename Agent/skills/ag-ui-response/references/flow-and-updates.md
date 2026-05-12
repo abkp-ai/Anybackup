@@ -1,25 +1,26 @@
-# Markdown 回写执行流
+# AG-UI 事件回写执行流
 
 ## 核心流程
 
-所有用户可见状态变化都通过 Markdown 文本表达，并由脚本包装到 MQ 消息的 `payload.ag_ui` 字段中。
+所有用户可见状态变化都通过标准 AG-UI 事件表达，并由脚本包装到 MQ 消息的 `payload.ag_ui_event` 字段中。
 
 推荐顺序：
 
-| 场景 | Markdown 内容 |
+| 场景 | AG-UI 事件 |
 | --- | --- |
-| 主动询问 | 缺失信息、风险确认项、等待用户补充的原因 |
-| 结果 | 阶段结论、候选方案、最终结果或脱敏错误说明 |
+| 主动询问 | `STATE_SNAPSHOT`，声明 HumanInTheLoopCapabilities |
+| 工具审批 | `TOOL_CALL_RESULT`，携带审批审计字段 |
+| 生命周期 | `RUN_STARTED`、`RUN_FINISHED` 或 `RUN_ERROR` |
 
-每次回写都是一段完整 Markdown。接收方按 `conversation_id + turn_id + message_id + sequence` 定位展示位置。
+每次回写都是一个完整 AG-UI 事件对象。接收方按 `conversation_id + turn_id + message_id + sequence` 定位展示位置。
 
 ## 强制输出门禁
 
 - 技能运行在 Linux 沙箱，命令示例和参数传递均按 bash + UTF-8 处理。
-- Agent 必须直接生成用户可见 Markdown，并通过 `--markdown` 传给脚本。
+- Agent 必须直接生成 AG-UI 事件，并通过 `--event-type`、`--run-id`、`--state-json` 或 `--result-json` 传给脚本。
 - 不得先生成草稿文件，也不得把模板文件路径作为运行时输入。
 - 信息不足或风险待确认时必须回写主动询问并停止继续执行。
-- 需要用户看到的阶段结论、候选方案、执行进度、验证结果和最终报告都必须回写 Markdown。
+- 需要用户看到的阶段结论、候选方案、执行进度、验证结果和最终报告都必须回写 AG-UI 事件。
 - 校验失败必须重新生成；MQ 发布失败必须停止业务动作，不得静默继续。
 
 ## 创建与替换
@@ -35,7 +36,7 @@
 - 复用已有 `message_id`。
 - 复用被替换内容的原 `sequence`。
 - 使用新的 `event_id`。
-- 新事件中的 Markdown 是整体替换文本，不是增量补丁。
+- 新事件中的 AG-UI payload 是整体替换内容，不是增量补丁。
 
 ## 内容组织
 
@@ -56,7 +57,7 @@
 
 - 同一 `event_id` 重放必须视为同一次投递，不得重复应用。
 - 新增内容的 `sequence` 按展示顺序分配新值。
-- 同一 `message_id + sequence` 携带新 `event_id` 时，接收方用新 Markdown 整体替换旧 Markdown。
+- 同一 `message_id + sequence` 携带新 `event_id` 时，接收方用新 AG-UI 事件整体替换旧事件。
 - `sequence` 不能跳号；跳号表示过期或乱序回写，应等待正确重投。
 
 ## 安全约束

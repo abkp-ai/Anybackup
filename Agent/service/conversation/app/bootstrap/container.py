@@ -1,5 +1,6 @@
 from dependency_injector import containers, providers
 
+from app.application.use_cases.ag_ui_runs import StartAgUiRunHandler
 from app.application.use_cases.agent_status import CoreAgentStatusEventHandler
 from app.application.use_cases.config import (
     CopyConversationConfigHandler,
@@ -105,6 +106,10 @@ class Container(containers.DeclarativeContainer):
     )
     list_conversation_events_handler = providers.Factory(
         ListConversationEventsHandler,
+        unit_of_work_factory=unit_of_work.provider,
+    )
+    start_ag_ui_run_handler = providers.Factory(
+        StartAgUiRunHandler,
         unit_of_work_factory=unit_of_work.provider,
     )
     get_conversation_context_handler = providers.Factory(
