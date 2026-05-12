@@ -9,7 +9,12 @@ from fastapi.responses import StreamingResponse
 
 from app.application.models.conversation import AuthenticatedUser
 from app.application.use_cases.ag_ui_runs import StartAgUiRunCommand
-from app.interfaces.http.ag_ui_sse.schemas import RunAgentInput
+from app.interfaces.http.ag_ui_sse.schemas import (
+    AgentCapabilities,
+    AgentCapabilitiesHumanInTheLoop,
+    AgentCapabilitiesIdentity,
+    RunAgentInput,
+)
 from app.interfaces.http.v1.dependencies import require_user_context
 from app.interfaces.http.v1.schemas import ERROR_RESPONSES
 
@@ -48,6 +53,26 @@ async def run_agent(
     )
 
 
+@router.get(
+    "/capabilities",
+    operation_id="getAgUiCapabilities",
+    response_model=AgentCapabilities,
+)
+async def get_capabilities(
+    user: Annotated[AuthenticatedUser, Depends(require_user_context)],
+) -> AgentCapabilities:
+    return AgentCapabilities(
+        identity=AgentCapabilitiesIdentity(
+            agentId="conversation-service",
+            name="Conversation Service",
+        ),
+        humanInTheLoop=AgentCapabilitiesHumanInTheLoop(
+            supported=True,
+            modes=["tool_approval", "selection_snapshot"],
+        ),
+    )
+
+
 async def _db_first_sse_stream(
     request: Request,
     *,
@@ -56,8 +81,8 @@ async def _db_first_sse_stream(
     after_sequence: int,
 ) -> AsyncIterator[str]:
     last_sequence = after_sequence
-    idle_polls = 0
-    while idle_polls < 20:
+    idle_count = 0
+    while True:
         if await request.is_disconnected():
             logger.info(
                 "ag_ui_sse_client_disconnected",
@@ -72,17 +97,18 @@ async def _db_first_sse_stream(
                 limit=50,
             )
         if not events:
-            idle_polls += 1
+            idle_count += 1
             await asyncio.sleep(0.05)
+            if idle_count % 20 == 0:
+                yield ": keep-alive\n\n"
             continue
-        idle_polls = 0
+        idle_count = 0
         for event in events:
             last_sequence = event.sequence
             payload = dict(event.payload)
             yield f"data: {json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}\n\n"
             if payload.get("type") in _TERMINAL_EVENT_TYPES:
                 return
-    yield ": keep-alive\n\n"
 
 
 def _after_sequence(forwarded_props: dict[str, object] | None) -> int:

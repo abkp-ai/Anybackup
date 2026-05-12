@@ -192,7 +192,12 @@ def _ag_ui_event(
     if event_type == "STATE_SNAPSHOT":
         event["state"] = {"selection": {"required": False}}
     if event_type == "TOOL_CALL_RESULT":
-        event["result"] = {"approved": True, "approvedBy": "user-001"}
+        event["result"] = {
+            "decision": "approved",
+            "actorRef": "user-001",
+            "occurredAt": "2026-05-12T10:00:00Z",
+            "summary": "User approved the tool call",
+        }
     return event
 
 

@@ -42,11 +42,35 @@ _ALLOWED_AG_UI_EVENT_TYPES = frozenset(
         "RUN_STARTED",
         "RUN_FINISHED",
         "RUN_ERROR",
+        "TEXT_MESSAGE_START",
+        "TEXT_MESSAGE_CONTENT",
+        "TEXT_MESSAGE_END",
+        "TEXT_MESSAGE_CHUNK",
+        "THINKING_START",
+        "THINKING_TEXT_MESSAGE_START",
+        "THINKING_TEXT_MESSAGE_CONTENT",
+        "THINKING_TEXT_MESSAGE_END",
+        "THINKING_END",
         "STATE_SNAPSHOT",
         "STATE_DELTA",
         "ACTIVITY_SNAPSHOT",
         "ACTIVITY_DELTA",
+        "TOOL_CALL_START",
+        "TOOL_CALL_ARGS",
+        "TOOL_CALL_END",
+        "TOOL_CALL_CHUNK",
         "TOOL_CALL_RESULT",
+        "MESSAGES_SNAPSHOT",
+        "STEP_STARTED",
+        "STEP_FINISHED",
+        "REASONING_START",
+        "REASONING_MESSAGE_START",
+        "REASONING_MESSAGE_CONTENT",
+        "REASONING_MESSAGE_END",
+        "REASONING_END",
+        "RAW",
+        "CUSTOM",
+        "ERROR",
     }
 )
 _SENSITIVE_MARKDOWN_MARKERS = (
@@ -420,8 +444,16 @@ def _validate_ag_ui_event(
         result = event.get("result")
         if not isinstance(result, dict):
             errors.append("TOOL_CALL_RESULT.result must be an object")
-        elif "approved" not in result or "approvedBy" not in result:
-            errors.append("TOOL_CALL_RESULT.result must contain approved and approvedBy")
+        else:
+            for field in ("decision", "actorRef", "occurredAt", "summary"):
+                if field not in result:
+                    errors.append(f"TOOL_CALL_RESULT.result must contain {field}")
+            if isinstance(result.get("decision"), str) and result["decision"] not in (
+                "approved",
+                "rejected",
+                "failed",
+            ):
+                errors.append("TOOL_CALL_RESULT.result.decision must be approved, rejected, or failed")
 
 
 def _validate_hitl_capabilities(state: dict[str, Any], errors: list[str]) -> None:

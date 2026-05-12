@@ -239,7 +239,7 @@ def _create_conversation_with_reasoning_trace(client: TestClient, content: str) 
         _set_conversation(
             client,
             int(body["conversation"]["conversation_id"]),
-            f_interaction_status="executing",
+            f_active_run_id="run-001",
         )
     )
     asyncio.run(_set_message(client, int(body["message"]["message_id"]), f_status="processing"))

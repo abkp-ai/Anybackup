@@ -75,7 +75,7 @@ def test_create_conversation_persists_initial_message_event_and_outbox(
     assert conversation["owner_user_id"] == "user-001"
     assert conversation["title"] == "Order DB restore"
     assert conversation["status"] == "active"
-    assert conversation["interaction_status"] == "thinking"
+    assert conversation["has_active_run"] is True
     assert conversation["tags"] == ["restore", "order"]
     assert message["conversation_id"] == conversation["conversation_id"]
     assert message["role"] == "user"
@@ -337,7 +337,7 @@ def test_patch_conversation_rejects_readonly_statuses(
             {
                 conversation_id: {
                     "f_status": status_value,
-                    "f_interaction_status": "idle",
+                    "f_active_run_id": None,
                 }
             },
         )

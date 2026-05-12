@@ -84,7 +84,12 @@ def test_tool_call_result_requires_approval_audit_fields() -> None:
         message_id="901",
         run_id="run-100",
         sequence=1,
-        result={"approved": True, "approvedBy": "user-001"},
+        result={
+            "decision": "approved",
+            "actorRef": "user-001",
+            "occurredAt": "2026-05-12T10:00:00Z",
+            "summary": "User approved the tool call",
+        },
     )
 
     validate_message(message)

@@ -54,7 +54,7 @@ def test_send_user_message_persists_message_event_outbox_and_marks_busy(
 ) -> None:
     created = _create_conversation(client, "conv-for-message")
     conversation_id = created["conversation"]["conversation_id"]
-    asyncio.run(_set_conversation(client, int(conversation_id), f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, int(conversation_id), f_active_run_id=None))
 
     response = client.post(
         f"{API_PREFIX}/conversations/{conversation_id}/messages",
@@ -69,7 +69,7 @@ def test_send_user_message_persists_message_event_outbox_and_marks_busy(
     assert response.status_code == 202
     body = response.json()
     assert body["conversation"]["conversation_id"] == conversation_id
-    assert body["conversation"]["interaction_status"] == "thinking"
+    assert body["conversation"]["has_active_run"] is True
     assert body["conversation"]["active_turn_id"] == body["message"]["turn_id"]
     assert body["message"]["conversation_id"] == conversation_id
     assert body["message"]["content"] == "Run the restore now"
@@ -97,7 +97,7 @@ def test_send_user_message_persists_message_event_outbox_and_marks_busy(
 def test_send_user_message_is_idempotent_before_busy_guard(client: TestClient) -> None:
     created = _create_conversation(client, "conv-for-idempotency")
     conversation_id = created["conversation"]["conversation_id"]
-    asyncio.run(_set_conversation(client, int(conversation_id), f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, int(conversation_id), f_active_run_id=None))
     headers = {
         "X-User": _x_user("user-001"),
         "Idempotency-Key": "message-idempotent-001",
@@ -125,7 +125,7 @@ def test_send_user_message_rejects_non_owner_and_idempotency_reuse(
 ) -> None:
     created = _create_conversation(client, "conv-for-owner-boundary")
     conversation_id = created["conversation"]["conversation_id"]
-    asyncio.run(_set_conversation(client, int(conversation_id), f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, int(conversation_id), f_active_run_id=None))
 
     forbidden = client.post(
         f"{API_PREFIX}/conversations/{conversation_id}/messages",
@@ -153,7 +153,7 @@ def test_send_user_message_rejects_non_owner_and_idempotency_reuse(
 def test_send_user_message_rejects_high_risk_credentials(client: TestClient) -> None:
     created = _create_conversation(client, "conv-for-sensitive-input")
     conversation_id = created["conversation"]["conversation_id"]
-    asyncio.run(_set_conversation(client, int(conversation_id), f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, int(conversation_id), f_active_run_id=None))
 
     response = client.post(
         f"{API_PREFIX}/conversations/{conversation_id}/messages",
@@ -171,9 +171,9 @@ def test_send_user_message_rejects_high_risk_credentials(client: TestClient) -> 
 @pytest.mark.parametrize(
     ("values", "expected_code"),
     [
-        ({"f_interaction_status": "thinking"}, "CONVERSATION_BUSY"),
-        ({"f_status": "archived", "f_interaction_status": "idle"}, "CONVERSATION_ARCHIVED"),
-        ({"f_status": "expired", "f_interaction_status": "idle"}, "CONVERSATION_EXPIRED"),
+        ({"f_active_run_id": "run-001"}, "CONVERSATION_BUSY"),
+        ({"f_status": "archived", "f_active_run_id": None}, "CONVERSATION_ARCHIVED"),
+        ({"f_status": "expired", "f_active_run_id": None}, "CONVERSATION_EXPIRED"),
     ],
 )
 def test_send_user_message_rejects_blocked_conversation_states(
@@ -202,7 +202,7 @@ def test_candidate_selection_message_is_accepted_via_messages_endpoint(
     conversation_id = int(created["conversation"]["conversation_id"])
     message_id = int(created["message"]["message_id"])
     reasoning_trace_id = f"trace-{conversation_id}"
-    asyncio.run(_set_conversation(client, conversation_id, f_interaction_status="completed"))
+    asyncio.run(_set_conversation(client, conversation_id, f_active_run_id=None))
     asyncio.run(
         _insert_reasoning_trace(
             client,
@@ -248,7 +248,7 @@ def test_clarification_response_is_accepted_while_conversation_is_clarifying(
 ) -> None:
     created = _create_conversation(client, "conv-for-clarification-response")
     conversation_id = int(created["conversation"]["conversation_id"])
-    asyncio.run(_set_conversation(client, conversation_id, f_interaction_status="clarifying"))
+    asyncio.run(_set_conversation(client, conversation_id, f_active_run_id="run-001"))
 
     response = client.post(
         f"{API_PREFIX}/conversations/{conversation_id}/messages",
@@ -267,7 +267,7 @@ def test_clarification_response_is_accepted_while_conversation_is_clarifying(
     assert response.status_code == 202
     body = response.json()
     assert body["conversation"]["conversation_id"] == str(conversation_id)
-    assert body["conversation"]["interaction_status"] == "thinking"
+    assert body["conversation"]["has_active_run"] is True
     assert body["message"]["content"] == (
         "clarification_response recovery_window latest_safe_point "
         "Use the latest safe point and continue restore planning"
@@ -282,9 +282,9 @@ def test_clarification_response_is_accepted_while_conversation_is_clarifying(
 def test_list_messages_paginates_and_filters(client: TestClient) -> None:
     created = _create_conversation(client, "conv-for-history")
     conversation_id = int(created["conversation"]["conversation_id"])
-    asyncio.run(_set_conversation(client, conversation_id, f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, conversation_id, f_active_run_id=None))
     _send_message(client, conversation_id, "message-history-001", "First follow-up")
-    asyncio.run(_set_conversation(client, conversation_id, f_interaction_status="idle"))
+    asyncio.run(_set_conversation(client, conversation_id, f_active_run_id=None))
     _send_message(client, conversation_id, "message-history-002", "Second follow-up")
     asyncio.run(_insert_assistant_message(client, conversation_id))
 
@@ -343,7 +343,7 @@ def test_list_events_returns_control_fields_and_turn_ids(client: TestClient) -> 
     body = response.json()
     assert body["latest_sequence"] == 1
     assert body["recommended_poll_interval_ms"] == 1000
-    assert body["interaction_status"] == "thinking"
+    assert body["has_active_run"] is True
     assert body["items"][0]["event_type"] == "message.created"
     assert body["items"][0]["turn_id"] == created["message"]["turn_id"]
     assert forbidden.status_code == 403

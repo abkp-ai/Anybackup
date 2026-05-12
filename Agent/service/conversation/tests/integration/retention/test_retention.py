@@ -70,7 +70,7 @@ def test_manual_archive_and_restore_create_status_events(client: TestClient) -> 
     assert archived.json()["archived_by"] == "user"
     assert restored.status_code == 200
     assert restored.json()["status"] == "active"
-    assert restored.json()["interaction_status"] == "idle"
+    assert restored.json()["has_active_run"] is False
     assert asyncio.run(_status_event_count(client, int(conversation_id))) == 3
 
 
@@ -120,7 +120,7 @@ def test_restore_blocks_active_conversation(client: TestClient) -> None:
 def test_manual_archive_blocks_in_progress_conversation(client: TestClient) -> None:
     created = _create_idle_conversation(client, "archive-busy")
     conversation_id = int(created["conversation_id"])
-    asyncio.run(_set_conversation(client, conversation_id, f_interaction_status="executing"))
+    asyncio.run(_set_conversation(client, conversation_id, f_active_run_id="run-001"))
 
     response = client.post(
         f"{API_PREFIX}/conversations/{conversation_id}/archive",
@@ -164,7 +164,7 @@ def test_retention_worker_archives_and_expires_with_redis_lock(client: TestClien
             archived_id,
             f_status="archived",
             f_archived_time=now_ms - 366 * 86_400_000,
-            f_interaction_status="idle",
+            f_active_run_id=None,
         )
     )
     worker = _worker(client, lock=FakeLock(acquired=True))
@@ -269,7 +269,7 @@ def _create_idle_conversation(client: TestClient, content: str) -> dict[str, str
         _set_conversation(
             client,
             int(body["conversation"]["conversation_id"]),
-            f_interaction_status="idle",
+            f_active_run_id=None,
         )
     )
     asyncio.run(_set_message(client, int(body["message"]["message_id"]), f_status="responded"))

@@ -137,7 +137,7 @@ def _thought_scenario(
                         ),
                         meta={"intent": "thought", "terminal": False},
                     ),
-                    _state("thinking", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -232,7 +232,7 @@ def _tool_call_scenario(
                             "sourceMessageId": incoming.message_id,
                         },
                     ),
-                    _state("executing", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -297,7 +297,7 @@ def _progress_scenario(
                         ),
                         meta={"intent": "progress", "terminal": False},
                     ),
-                    _state("executing", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -395,7 +395,6 @@ def _clarifying_scenario(
                         meta={"intent": "clarification", "terminal": False},
                     ),
                     _state(
-                        "clarifying",
                         active_block_ids=[block_id],
                         selection={
                             "required": True,
@@ -488,7 +487,7 @@ def _restore_scenario(
                         ),
                         meta={"intent": "thought", "terminal": False},
                     ),
-                    _state("thinking", active_block_ids=[f"restore_thought_{suffix}"]),
+                    _state(active_block_ids=[f"restore_thought_{suffix}"]),
                 ),
             ),
             AgUiStep(
@@ -556,7 +555,7 @@ def _restore_scenario(
                         ),
                         meta={"intent": "tool_call", "terminal": False},
                     ),
-                    _state("executing", active_block_ids=[f"restore_tool_{suffix}"]),
+                    _state(active_block_ids=[f"restore_tool_{suffix}"]),
                 ),
             ),
             AgUiStep(
@@ -583,7 +582,6 @@ def _restore_scenario(
                         },
                     ),
                     _state(
-                        "completed",
                         active_block_ids=[result_block_id],
                         selection={
                             "required": True,
@@ -697,7 +695,7 @@ def _capacity_scenario(
                         ],
                         meta={"intent": "result", "terminal": True},
                     ),
-                    _state("completed", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -783,7 +781,7 @@ def _attachment_scenario(
                         ),
                         meta={"intent": "result", "terminal": True},
                     ),
-                    _state("completed", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -851,7 +849,7 @@ def _visible_error_scenario(
                         ],
                         meta={"intent": "error", "terminal": True},
                     ),
-                    _state("error", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -912,7 +910,6 @@ def _doc_candidate_compare_scenario(
                         },
                     ),
                     _state(
-                        "completed",
                         active_block_ids=["candidate_compare_001"],
                         selection={
                             "required": True,
@@ -1118,7 +1115,7 @@ def _doc_report_detail_scenario(
                             "reasoningTrace": reasoning_trace,
                         },
                     ),
-                    _state("completed", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -1191,7 +1188,7 @@ def _incremental_scenario(
                             )
                         ],
                     ),
-                    _state("thinking", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                     _activity_delta(
                         message_id=f"activity_{block_id}",
                         patch=[
@@ -1214,7 +1211,6 @@ def _incremental_scenario(
                     ),
                     _state_delta(
                         [
-                            {"op": "replace", "path": "/interaction/status", "value": "executing"},
                             {"op": "replace", "path": "/view/activeBlockIds/0", "value": block_id},
                         ]
                     ),
@@ -1314,7 +1310,7 @@ def _general_scenario(
                         ),
                         meta={"intent": "result", "terminal": True},
                     ),
-                    _state("completed", active_block_ids=[block_id]),
+                    _state(active_block_ids=[block_id]),
                 ),
             ),
         ),
@@ -1662,17 +1658,16 @@ def _activity_delta(*, message_id: str, patch: list[dict[str, Any]]) -> dict[str
 
 
 def _state(
-    status: str,
     *,
     active_block_ids: list[str] | None = None,
     selection: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    snapshot: dict[str, Any] = {"interaction": {"status": status}}
+    state: dict[str, Any] = {}
     if active_block_ids is not None:
-        snapshot["view"] = {"activeBlockIds": active_block_ids}
+        state["view"] = {"activeBlockIds": active_block_ids}
     if selection is not None:
-        snapshot["selection"] = selection
-    return {"type": "STATE_SNAPSHOT", "snapshot": snapshot}
+        state["selection"] = selection
+    return {"type": "STATE_SNAPSHOT", "state": state}
 
 
 def _state_delta(delta: list[dict[str, Any]]) -> dict[str, Any]:

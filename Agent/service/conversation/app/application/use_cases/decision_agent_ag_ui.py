@@ -28,8 +28,11 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "TEXT_MESSAGE_START",
         "TEXT_MESSAGE_CONTENT",
         "TEXT_MESSAGE_END",
+        "TEXT_MESSAGE_CHUNK",
         "THINKING_START",
+        "THINKING_TEXT_MESSAGE_START",
         "THINKING_TEXT_MESSAGE_CONTENT",
+        "THINKING_TEXT_MESSAGE_END",
         "THINKING_END",
         "STATE_SNAPSHOT",
         "STATE_DELTA",
@@ -38,8 +41,19 @@ _ALLOWED_EVENT_TYPES = frozenset(
         "TOOL_CALL_START",
         "TOOL_CALL_ARGS",
         "TOOL_CALL_END",
+        "TOOL_CALL_CHUNK",
         "TOOL_CALL_RESULT",
+        "MESSAGES_SNAPSHOT",
+        "STEP_STARTED",
+        "STEP_FINISHED",
+        "REASONING_START",
+        "REASONING_MESSAGE_START",
+        "REASONING_MESSAGE_CONTENT",
+        "REASONING_MESSAGE_END",
+        "REASONING_END",
         "RAW",
+        "CUSTOM",
+        "ERROR",
     }
 )
 
@@ -269,12 +283,22 @@ def _validate_ag_ui_event(command: DecisionAgentAgUiEventCommand) -> dict[str, A
         raise ValueError("STATE_SNAPSHOT must use state")
     if "snapshot" in event:
         raise ValueError("AG-UI events must not use snapshot")
+    if event_type == "STATE_DELTA":
+        operation = event.get("operation")
+        if operation is not None and operation not in ("merge", "replace", "patch"):
+            raise ValueError("STATE_DELTA.operation must be merge, replace, or patch")
     if event_type == "TOOL_CALL_RESULT":
         result = event.get("result")
         if not isinstance(result, dict):
             raise ValueError("TOOL_CALL_RESULT.result must be an object")
-        if "approved" not in result and "approvalStatus" not in result:
-            raise ValueError("TOOL_CALL_RESULT.result must contain approval audit fields")
+        required_fields = {"decision", "actorRef", "occurredAt", "summary"}
+        missing = required_fields - set(result)
+        if missing:
+            raise ValueError(
+                f"TOOL_CALL_RESULT.result must contain {', '.join(sorted(missing))}"
+            )
+        if result["decision"] not in ("approved", "rejected", "failed"):
+            raise ValueError("TOOL_CALL_RESULT.result.decision must be approved, rejected, or failed")
     _reject_rich_payload(event)
     return event
 

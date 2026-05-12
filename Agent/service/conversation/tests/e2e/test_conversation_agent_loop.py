@@ -197,19 +197,18 @@ def test_visible_error_mock_runner_closes_turn_as_completed(client: TestClient) 
     )
 
     conversation = asyncio.run(_conversation_record(client, int(conversation_id)))
-    assert conversation.f_interaction_status == "completed"
+    assert conversation.f_active_run_id is None
     assert conversation.f_active_turn_id is None
     assert messages.status_code == 200
     message_items = messages.json()["items"]
     assert [item["status"] for item in message_items] == ["responded", "responded"]
     assert events.status_code == 200
     events_body = events.json()
-    assert events_body["interaction_status"] == "completed"
+    assert events_body["has_active_run"] is False
     assert {item["event_type"] for item in events_body["items"]} >= {
         "message.created",
         "message.updated",
         "rich_content.created",
-        "interaction.status_changed",
     }
 
 

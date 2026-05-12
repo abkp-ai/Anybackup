@@ -102,7 +102,7 @@ async def test_completed_event_closes_turn_without_ag_ui_content(
     await _insert_conversation_with_message(
         database_url,
         message_status="processing",
-        interaction_status="executing",
+        active_run_id="200",
     )
     handler = _handler(database_url)
 
@@ -177,7 +177,7 @@ async def test_late_accepted_event_does_not_regress_responded_message(database_u
     await _insert_conversation_with_message(
         database_url,
         message_status="responded",
-        interaction_status="completed",
+        active_run_id=None,
     )
     handler = _handler(database_url)
 
@@ -279,7 +279,7 @@ async def _insert_conversation_with_message(
     database_url: str,
     *,
     message_status: str,
-    interaction_status: str = "thinking",
+    active_run_id: str | None = "200",
 ) -> None:
     engine = create_async_engine(database_url)
     async with engine.begin() as connection:
@@ -291,11 +291,7 @@ async def _insert_conversation_with_message(
                 f_title="restore backup",
                 f_display_summary=None,
                 f_status="active",
-                f_active_run_id=(
-                    "200"
-                    if interaction_status in {"thinking", "executing", "clarifying"}
-                    else None
-                ),
+                f_active_run_id=active_run_id,
                 f_scenario_binding=None,
                 f_tags=[],
                 f_retention_policy="conversation_default_v1",

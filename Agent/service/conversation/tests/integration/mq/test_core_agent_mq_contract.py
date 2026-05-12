@@ -124,7 +124,7 @@ async def _insert_idle_conversation(database_url: str, *, conversation_id: int) 
                 f_title="restore backup",
                 f_display_summary=None,
                 f_status="active",
-                f_interaction_status="idle",
+                f_active_run_id=None,
                 f_active_turn_id=None,
                 f_scenario_binding=None,
                 f_tags=[],

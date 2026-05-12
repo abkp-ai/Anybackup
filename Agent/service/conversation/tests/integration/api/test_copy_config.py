@@ -66,7 +66,7 @@ def test_copy_config_creates_new_conversation_without_history_or_private_input(
     assert body["owner_user_id"] == "source-owner"
     assert body["title"] == "Copied backup plan"
     assert body["status"] == "active"
-    assert body["interaction_status"] == "idle"
+    assert body["has_active_run"] is False
     assert body["scenario_binding"]["scenario_id"] == "backup_recovery"
     assert body["scenario_binding"]["task_type"] == "restore_drill"
     assert body["scenario_binding"]["asset_refs"] == ["vm-001", "db-002"]
@@ -201,7 +201,7 @@ def _create_source_conversation(
         _set_conversation(
             client,
             conversation_id,
-            f_interaction_status="idle",
+            f_active_run_id=None,
             f_scenario_binding={
                 "scenario_id": "backup_recovery",
                 "task_type": "restore_drill",
