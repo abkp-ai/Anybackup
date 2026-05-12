@@ -20,7 +20,7 @@ jobs:
         continue-on-error: true
         run: |
           echo "========== 火山云 CR 连通性测试 =========="
-          VOLC_CR="你的火山云CR域名.cr.volces.com"  # 改成你的
+          VOLC_CR="anybackup-v9-cn-beijing.cr.volces.com"  # 改成你的
           
           echo "--- DNS 解析 ---"
           nslookup ${VOLC_CR} || echo "DNS failed"
