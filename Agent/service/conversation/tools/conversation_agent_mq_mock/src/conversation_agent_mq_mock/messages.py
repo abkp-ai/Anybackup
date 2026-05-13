@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 DEFAULT_CORE_STATUS_QUEUE = "conversation.core_agent.status.v1"
 DEFAULT_AG_UI_EXCHANGE = "decision_agent.ag_ui.events"
-DEFAULT_AG_UI_ROUTING_KEY = "decision_agent.session.ag_ui_event.v1"
+DEFAULT_AG_UI_ROUTING_KEY = "decision_agent.session.business_data.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +62,15 @@ class AgUiStep:
     sequence: int
     content: str
     events: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BusinessDataStep:
+    sequence: int
+    content: str
+    schema_type: str
+    schema_version: str = "1"
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 def build_core_status_message(
@@ -134,6 +143,44 @@ def build_ag_ui_message(
             "content": step.content,
             "sequence": step.sequence,
             "ag_ui": _markdown_from_step(step),
+        },
+    }
+    return OutgoingMqMessage(
+        body=body,
+        exchange=exchange,
+        routing_key=routing_key,
+        headers=_headers(incoming.trace_id, incoming.correlation_id),
+    )
+
+
+def build_business_data_message(
+    incoming: IncomingConversationMessage,
+    *,
+    step: BusinessDataStep,
+    now_ms: int,
+    exchange: str = DEFAULT_AG_UI_EXCHANGE,
+    routing_key: str = DEFAULT_AG_UI_ROUTING_KEY,
+    source_service: str = "decision_agent_session",
+) -> OutgoingMqMessage:
+    event_id = f"decision-agent.bizdata.{incoming.message_id}.{step.sequence}"
+    body = {
+        "event_id": event_id,
+        "event_type": "decision_agent.session.business_data",
+        "occurred_at": _ms_to_iso(now_ms),
+        "source_service": source_service,
+        "trace_id": incoming.trace_id,
+        "correlation_id": incoming.correlation_id,
+        "payload": {
+            "conversation_id": incoming.conversation_id,
+            "turn_id": incoming.turn_id,
+            "message_id": _assistant_output_message_id(incoming),
+            "content": step.content,
+            "sequence": step.sequence,
+            "business_data": {
+                "schema_type": step.schema_type,
+                "schema_version": step.schema_version,
+                "data": step.data,
+            },
         },
     }
     return OutgoingMqMessage(

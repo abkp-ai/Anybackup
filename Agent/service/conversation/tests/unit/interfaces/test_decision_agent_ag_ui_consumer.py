@@ -1,6 +1,6 @@
 import pytest
 
-from app.application.commands.agent_events import DecisionAgentAgUiEventCommand
+from app.application.commands.agent_events import DecisionAgentBusinessDataCommand
 from app.interfaces.mq import decision_agent_ag_ui_consumer
 from app.interfaces.mq.decision_agent_ag_ui_consumer import (
     RabbitMqDecisionAgentAgUiConsumer,
@@ -26,7 +26,7 @@ async def test_ag_ui_consumer_binds_decision_agent_exchange(monkeypatch) -> None
         exchange_name="decision_agent.ag_ui.events",
         queue_name="conversation.decision_agent.ag_ui",
         prefetch_count=10,
-        handler=NoopHandler(),
+        converter=NoopConverter(),
     )
 
     await consumer.start()
@@ -42,56 +42,115 @@ async def test_ag_ui_consumer_binds_decision_agent_exchange(monkeypatch) -> None
     assert connection.channel_instance.queue.bind_calls == [
         {
             "exchange": "decision_agent.ag_ui.events",
-            "routing_key": "decision_agent.session.ag_ui_event.v1",
+            "routing_key": "decision_agent.session.business_data.v1",
         }
     ]
     assert connection.channel_instance.queue.consume_calls == [False]
 
 
-def test_command_from_body_accepts_markdown_payload_ag_ui() -> None:
+def test_command_from_body_parses_business_data() -> None:
     command = _command_from_body(
         {
-            "event_id": "evt-markdown-001",
-            "event_type": "decision_agent.session.ag_ui_event",
+            "event_id": "evt-bizdata-001",
+            "event_type": "decision_agent.session.business_data",
             "source_service": "decision_agent_session",
-            "occurred_at": "2026-04-28T10:00:00Z",
+            "occurred_at": "2026-05-13T10:00:00Z",
             "payload": {
                 "conversation_id": "100",
                 "turn_id": "200",
                 "message_id": "901",
-                "content": "方案设计已生成。",
+                "content": "恢复候选方案",
                 "sequence": 1,
-                "ag_ui": "# 方案设计\n\n这里是 Markdown 内容。",
+                "business_data": {
+                    "schema_type": "plan_candidates",
+                    "schema_version": "1",
+                    "data": {
+                        "heading": "恢复候选方案",
+                        "candidates": [
+                            {
+                                "candidate_option_id": "a",
+                                "title": "方案A",
+                                "summary": "推荐",
+                                "recommendation_level": "recommended",
+                                "risk_level": "medium",
+                            }
+                        ],
+                    },
+                },
             },
         }
     )
+    assert isinstance(command, DecisionAgentBusinessDataCommand)
+    assert command.schema_type == "plan_candidates"
+    assert command.schema_version == "1"
+    assert command.content == "恢复候选方案"
+    assert command.data["heading"] == "恢复候选方案"
+    assert len(command.data["candidates"]) == 1
 
-    assert command.ag_ui == "# 方案设计\n\n这里是 Markdown 内容。"
+
+def test_command_from_body_defaults_schema_version() -> None:
+    command = _command_from_body(
+        {
+            "event_id": "evt-bizdata-002",
+            "event_type": "decision_agent.session.business_data",
+            "source_service": "decision_agent_session",
+            "occurred_at": "2026-05-13T10:00:00Z",
+            "payload": {
+                "conversation_id": "100",
+                "turn_id": "200",
+                "message_id": "901",
+                "content": "text",
+                "sequence": 1,
+                "business_data": {
+                    "schema_type": "text_message",
+                    "data": {"text": "hello"},
+                },
+            },
+        }
+    )
+    assert command.schema_version == "1"
 
 
-@pytest.mark.parametrize("ag_ui", [None, "", "  ", {"version": "1.x", "events": []}])
-def test_command_from_body_rejects_missing_empty_or_object_ag_ui(ag_ui: object) -> None:
-    with pytest.raises(ValueError, match="ag_ui"):
+def test_command_from_body_rejects_missing_business_data() -> None:
+    with pytest.raises(ValueError, match="business_data"):
         _command_from_body(
             {
-                "event_id": "evt-markdown-invalid",
-                "event_type": "decision_agent.session.ag_ui_event",
+                "event_id": "evt-invalid",
+                "event_type": "decision_agent.session.business_data",
                 "source_service": "decision_agent_session",
+                "occurred_at": "2026-05-13T10:00:00Z",
                 "payload": {
                     "conversation_id": "100",
                     "turn_id": "200",
                     "message_id": "901",
-                    "content": "方案设计已生成。",
                     "sequence": 1,
-                    "ag_ui": ag_ui,
                 },
             }
         )
 
 
-class NoopHandler:
-    async def handle(self, command: DecisionAgentAgUiEventCommand) -> object:
-        return command
+def test_command_from_body_rejects_non_dict_business_data() -> None:
+    with pytest.raises(ValueError, match="business_data"):
+        _command_from_body(
+            {
+                "event_id": "evt-invalid",
+                "event_type": "decision_agent.session.business_data",
+                "source_service": "decision_agent_session",
+                "occurred_at": "2026-05-13T10:00:00Z",
+                "payload": {
+                    "conversation_id": "100",
+                    "turn_id": "200",
+                    "message_id": "901",
+                    "sequence": 1,
+                    "business_data": "not a dict",
+                },
+            }
+        )
+
+
+class NoopConverter:
+    async def process_business_data(self, command: DecisionAgentBusinessDataCommand) -> None:
+        pass
 
 
 class FakeConnection:

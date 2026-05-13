@@ -10,9 +10,10 @@ from time import time
 from typing import Any
 
 DEFAULT_EXCHANGE = "decision_agent.ag_ui.events"
-DEFAULT_ROUTING_KEY = "decision_agent.session.ag_ui_event.v1"
+DEFAULT_ROUTING_KEY = "decision_agent.session.business_data.v1"
 DEFAULT_SOURCE_SERVICE = "decision_agent_session"
 DEFAULT_MESSAGE_TYPE = "decision_agent.session.ag_ui_event"
+DEFAULT_BUSINESS_DATA_MESSAGE_TYPE = "decision_agent.session.business_data"
 DEFAULT_SNOWFLAKE_EPOCH_MS = 1_735_689_600_000
 DEFAULT_SNOWFLAKE_NODE_ID = 900
 _SNOWFLAKE_NODE_ID_BITS = 10
@@ -356,6 +357,171 @@ def generate_valid_message_from_event(
     }
     validate_message(message)
     return message
+
+
+ALLOWED_SCHEMA_TYPES = frozenset(
+    {
+        "plan_candidates",
+        "progress_report",
+        "clarification_request",
+        "capacity_forecast",
+        "attachment_list",
+        "report_detail",
+        "text_message",
+        "incremental_update",
+    }
+)
+
+_ALLOWED_BUSINESS_DATA_MESSAGE_FIELDS = frozenset(
+    {"event_id", "event_type", "occurred_at", "source_service", "payload"}
+)
+_ALLOWED_BUSINESS_DATA_PAYLOAD_FIELDS = frozenset(
+    {"conversation_id", "turn_id", "message_id", "sequence", "content", "business_data"}
+)
+
+
+def generate_valid_message_from_business_data(
+    *,
+    schema_type: object,
+    schema_version: object = "1",
+    data: object,
+    conversation_id: object,
+    turn_id: object,
+    message_id: object,
+    sequence: object,
+    content: object | None = None,
+    event_id: object | None = None,
+    occurred_at: object | None = None,
+    source_service: object = DEFAULT_SOURCE_SERVICE,
+    now_ms: int | None = None,
+) -> dict[str, Any]:
+    errors: list[str] = []
+    conversation_id_text = _coerce_non_empty_id(conversation_id, "conversation_id", errors)
+    turn_id_text = _coerce_non_empty_id(turn_id, "turn_id", errors)
+    message_id_text = _coerce_non_empty_id(message_id, "message_id", errors)
+    sequence_value = _coerce_positive_int(sequence, "sequence", errors)
+    schema_type_text = _coerce_non_empty_string(schema_type, "schema_type", errors)
+    schema_version_text = _coerce_non_empty_string(schema_version, "schema_version", errors)
+    source_service_text = _coerce_non_empty_string(source_service, "source_service", errors)
+    current_ms = _current_time_ms() if now_ms is None else now_ms
+    if isinstance(current_ms, bool) or not isinstance(current_ms, int) or current_ms < 0:
+        errors.append("now_ms must be a non-negative integer when provided")
+
+    if not isinstance(data, dict):
+        errors.append("data must be a JSON object")
+
+    if schema_type_text is not None and schema_type_text not in ALLOWED_SCHEMA_TYPES:
+        errors.append(f"schema_type must be one of {sorted(ALLOWED_SCHEMA_TYPES)}")
+
+    content_text: str | None
+    if content is not None:
+        content_text = _coerce_non_empty_string(content, "content", errors)
+    else:
+        content_text = None
+
+    occurred_at_text: str | None
+    if occurred_at is None:
+        occurred_at_text = _ms_to_iso(current_ms if isinstance(current_ms, int) else 0)
+    else:
+        occurred_at_text = _coerce_non_empty_string(occurred_at, "occurred_at", errors)
+        if occurred_at_text is not None:
+            _validate_iso_timestamp(occurred_at_text, "occurred_at", errors)
+
+    if errors:
+        raise ContractValidationError(errors)
+
+    assert conversation_id_text is not None
+    assert turn_id_text is not None
+    assert message_id_text is not None
+    assert sequence_value is not None
+    assert schema_type_text is not None
+    assert schema_version_text is not None
+    assert source_service_text is not None
+    assert occurred_at_text is not None
+    assert isinstance(data, dict)
+
+    event_id_text = (
+        _coerce_non_empty_string(event_id, "event_id", errors)
+        if event_id is not None
+        else f"decision-agent.bizdata.{conversation_id_text}.{sequence_value}.{current_ms}"
+    )
+    if errors:
+        raise ContractValidationError(errors)
+    assert event_id_text is not None
+
+    if content_text is None:
+        content_text = _derive_business_data_summary(schema_type_text, data)
+
+    message = {
+        "event_id": event_id_text,
+        "event_type": DEFAULT_BUSINESS_DATA_MESSAGE_TYPE,
+        "occurred_at": occurred_at_text,
+        "source_service": source_service_text,
+        "payload": {
+            "conversation_id": conversation_id_text,
+            "turn_id": turn_id_text,
+            "message_id": message_id_text,
+            "content": content_text,
+            "sequence": sequence_value,
+            "business_data": {
+                "schema_type": schema_type_text,
+                "schema_version": schema_version_text,
+                "data": deepcopy(data),
+            },
+        },
+    }
+    validate_business_data_message(message)
+    return message
+
+
+def validate_business_data_message(message: object) -> dict[str, Any]:
+    if not isinstance(message, dict):
+        raise ContractValidationError(["message must be a JSON object"])
+
+    errors: list[str] = []
+    _reject_unexpected_fields(message, _ALLOWED_BUSINESS_DATA_MESSAGE_FIELDS, "message", errors)
+    _expect_non_empty_string(message.get("event_id"), "message.event_id", errors)
+    if message.get("event_type") != DEFAULT_BUSINESS_DATA_MESSAGE_TYPE:
+        errors.append(f"message.event_type must be {DEFAULT_BUSINESS_DATA_MESSAGE_TYPE!r}")
+    _validate_iso_timestamp(message.get("occurred_at"), "message.occurred_at", errors)
+    _expect_non_empty_string(message.get("source_service"), "message.source_service", errors)
+
+    payload = message.get("payload")
+    if not isinstance(payload, dict):
+        errors.append("message.payload must be an object")
+    else:
+        _reject_unexpected_fields(payload, _ALLOWED_BUSINESS_DATA_PAYLOAD_FIELDS, "message.payload", errors)
+        _expect_non_empty_string(
+            payload.get("conversation_id"), "message.payload.conversation_id", errors
+        )
+        _expect_non_empty_string(payload.get("turn_id"), "message.payload.turn_id", errors)
+        _expect_non_empty_string(payload.get("message_id"), "message.payload.message_id", errors)
+        _expect_positive_int(payload.get("sequence"), "message.payload.sequence", errors)
+        _expect_non_empty_string(payload.get("content"), "message.payload.content", errors)
+
+        business_data = payload.get("business_data")
+        if not isinstance(business_data, dict):
+            errors.append("message.payload.business_data must be an object")
+        else:
+            schema_type = business_data.get("schema_type")
+            if schema_type not in ALLOWED_SCHEMA_TYPES:
+                errors.append(f"message.payload.business_data.schema_type must be one of {sorted(ALLOWED_SCHEMA_TYPES)}")
+            schema_version = business_data.get("schema_version")
+            if schema_version != "1":
+                errors.append("message.payload.business_data.schema_version must be '1'")
+            if not isinstance(business_data.get("data"), dict):
+                errors.append("message.payload.business_data.data must be an object")
+
+    if errors:
+        raise ContractValidationError(errors)
+    return deepcopy(message)
+
+
+def _derive_business_data_summary(schema_type: str, data: dict[str, Any]) -> str:
+    heading = data.get("heading") or data.get("question") or data.get("text", "")
+    if isinstance(heading, str) and heading.strip():
+        return heading.strip()[:200]
+    return f"{schema_type} response generated."
 
 
 def validate_draft(draft: object) -> dict[str, Any]:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from conversation_agent_mq_mock.messages import AgUiStep, IncomingConversationMessage
+from conversation_agent_mq_mock.messages import AgUiStep, BusinessDataStep, IncomingConversationMessage
 
 
 LAYOUT_TREE_ACTIVITY_TYPE = "conversation.ui.layout-tree"
@@ -17,6 +17,7 @@ class ScenarioPlan:
     core_agent_run_id: str
     result_summary: str
     ag_ui_steps: tuple[AgUiStep, ...]
+    business_data_steps: tuple[BusinessDataStep, ...] = ()
 
 
 def build_scenario(

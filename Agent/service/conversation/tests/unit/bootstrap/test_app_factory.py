@@ -45,6 +45,7 @@ class FakeContainer:
     def __init__(self) -> None:
         self._core_agent_status_consumer = FakeConsumer()
         self._decision_agent_ag_ui_consumer = FakeConsumer()
+        self._core_agent_kweaver_consumer = FakeConsumer()
         self._event_publisher = FakePublisher()
 
     def core_agent_status_consumer(self) -> FakeConsumer:
@@ -52,6 +53,9 @@ class FakeContainer:
 
     def decision_agent_ag_ui_consumer(self) -> FakeConsumer:
         return self._decision_agent_ag_ui_consumer
+
+    def core_agent_kweaver_consumer(self) -> FakeConsumer:
+        return self._core_agent_kweaver_consumer
 
     def event_publisher(self) -> FakePublisher:
         return self._event_publisher
@@ -80,10 +84,12 @@ def test_lifespan_starts_all_background_worker_loops(monkeypatch) -> None:
             )
             assert container._core_agent_status_consumer.started is True
             assert container._decision_agent_ag_ui_consumer.started is True
+            assert container._core_agent_kweaver_consumer.started is True
 
         assert all(task.cancelled for task in created_tasks)
         assert container._core_agent_status_consumer.closed is True
         assert container._decision_agent_ag_ui_consumer.closed is True
+        assert container._core_agent_kweaver_consumer.closed is True
         assert container._event_publisher.closed is True
 
     asyncio.run(exercise())

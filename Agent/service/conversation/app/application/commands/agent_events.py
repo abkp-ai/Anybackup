@@ -28,3 +28,37 @@ class DecisionAgentAgUiEventCommand:
     trace_id: str = ""
     correlation_id: str = ""
     occurred_time: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CoreAgentKweaverStreamCommand:
+    event_id: str
+    event_type: str
+    source_service: str
+    conversation_id: int
+    turn_id: int
+    message_id: int
+    run_id: str
+    chunk_index: int
+    kweaver_event: dict[str, Any]
+    trace_id: str = ""
+    correlation_id: str = ""
+    occurred_time: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionAgentBusinessDataCommand:
+    event_id: str
+    event_type: str
+    source_service: str
+    conversation_id: int
+    turn_id: int
+    message_id: int
+    sequence: int
+    content: str
+    schema_type: str
+    schema_version: str
+    data: dict[str, Any]
+    trace_id: str = ""
+    correlation_id: str = ""
+    occurred_time: int | None = None

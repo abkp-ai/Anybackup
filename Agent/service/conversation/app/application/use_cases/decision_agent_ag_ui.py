@@ -20,6 +20,7 @@ from app.domain.shared.errors import DomainError, ErrorReason
 logger = logging.getLogger(__name__)
 
 _TERMINAL_EVENT_TYPES = frozenset({"RUN_FINISHED", "RUN_ERROR"})
+_ALLOWED_SOURCE_SERVICES = frozenset({"decision_agent_session", "core_agent_service"})
 _ALLOWED_EVENT_TYPES = frozenset(
     {
         "RUN_STARTED",
@@ -72,6 +73,8 @@ class DecisionAgentAgUiEventHandler:
         self,
         command: DecisionAgentAgUiEventCommand,
     ) -> DecisionAgentAgUiEventResult:
+        if command.source_service not in _ALLOWED_SOURCE_SERVICES:
+            raise ValueError(f"source_service must be one of {sorted(_ALLOWED_SOURCE_SERVICES)}")
         logger.info(
             "decision_agent_ag_ui_event_handle_enter",
             extra={

@@ -14,7 +14,10 @@ def test_settings_load_default_service_baseline() -> None:
     assert settings.core_agent_status_queue == "conversation.core_agent.run_status"
     assert settings.decision_agent_ag_ui_exchange == "decision_agent.ag_ui.events"
     assert settings.decision_agent_ag_ui_queue == "conversation.decision_agent.ag_ui"
-    assert settings.decision_agent_ag_ui_routing_key == "decision_agent.session.ag_ui_event.v1"
+    assert settings.decision_agent_ag_ui_routing_key == "decision_agent.session.business_data.v1"
+    assert settings.core_agent_kweaver_exchange == "core_agent.kweaver.stream"
+    assert settings.core_agent_kweaver_queue == "conversation.core_agent.kweaver"
+    assert settings.core_agent_kweaver_routing_key == "core_agent.kweaver.stream_event.v1"
     assert settings.snowflake_node_id == 1
     assert settings.snowflake_epoch_ms == 1_735_689_600_000
 

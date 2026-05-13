@@ -16,6 +16,9 @@ from app.application.use_cases.conversation import (
     SendUserMessageHandler,
 )
 from app.application.use_cases.decision_agent_ag_ui import DecisionAgentAgUiEventHandler
+from app.application.use_cases.business_data_to_ag_ui import BusinessDataToAgUiConverter
+from app.application.use_cases.kweaver_to_ag_ui import KweaverToAgUiConverter
+from app.application.ag_ui_templates.registry import AgUiTemplateRegistry
 from app.application.use_cases.outbox import OutboxPublisherWorker
 from app.application.use_cases.reasoning import (
     ConfirmCandidateSelectionHandler,
@@ -41,6 +44,7 @@ from app.infrastructure.persistence.sqlalchemy.session import (
 from app.infrastructure.persistence.sqlalchemy.unit_of_work import SqlAlchemyUnitOfWork
 from app.interfaces.mq.agent_status_consumer import RabbitMqCoreAgentStatusConsumer
 from app.interfaces.mq.decision_agent_ag_ui_consumer import RabbitMqDecisionAgentAgUiConsumer
+from app.interfaces.mq.core_agent_kweaver_consumer import RabbitMqCoreAgentKweaverConsumer
 
 
 class Container(containers.DeclarativeContainer):
@@ -176,6 +180,16 @@ class Container(containers.DeclarativeContainer):
         unit_of_work_factory=unit_of_work.provider,
         id_generator=id_generator,
     )
+    ag_ui_template_registry = providers.Singleton(AgUiTemplateRegistry)
+    business_data_converter = providers.Singleton(
+        BusinessDataToAgUiConverter,
+        template_registry=ag_ui_template_registry,
+        handler=decision_agent_ag_ui_handler,
+    )
+    kweaver_converter = providers.Singleton(
+        KweaverToAgUiConverter,
+        handler=decision_agent_ag_ui_handler,
+    )
     core_agent_status_consumer = providers.Singleton(
         RabbitMqCoreAgentStatusConsumer,
         rabbitmq_url=settings.provided.rabbitmq_url,
@@ -191,7 +205,16 @@ class Container(containers.DeclarativeContainer):
         queue_name=settings.provided.decision_agent_ag_ui_queue,
         routing_key=settings.provided.decision_agent_ag_ui_routing_key,
         prefetch_count=settings.provided.decision_agent_ag_ui_prefetch_count,
-        handler=decision_agent_ag_ui_handler,
+        converter=business_data_converter,
+    )
+    core_agent_kweaver_consumer = providers.Singleton(
+        RabbitMqCoreAgentKweaverConsumer,
+        rabbitmq_url=settings.provided.rabbitmq_url,
+        exchange_name=settings.provided.core_agent_kweaver_exchange,
+        queue_name=settings.provided.core_agent_kweaver_queue,
+        routing_key=settings.provided.core_agent_kweaver_routing_key,
+        prefetch_count=settings.provided.core_agent_kweaver_prefetch_count,
+        converter=kweaver_converter,
     )
     outbox_publisher_worker = providers.Factory(
         OutboxPublisherWorker,

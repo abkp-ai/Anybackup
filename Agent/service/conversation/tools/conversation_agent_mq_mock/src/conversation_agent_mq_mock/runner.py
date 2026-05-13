@@ -8,10 +8,12 @@ from dataclasses import replace
 from typing import Any, Protocol
 
 from conversation_agent_mq_mock.messages import (
+    BusinessDataStep,
     IncomingConversationMessage,
     OutgoingMqMessage,
-    build_ag_ui_message,
+    build_business_data_message,
     build_core_status_message,
+    AgUiStep,
 )
 from conversation_agent_mq_mock.scenario import (
     build_scenario,
@@ -108,13 +110,14 @@ class AgentMqMockRunner:
             return
 
         scenario = build_scenario(incoming, core_agent_run_id=run_id)
+        steps = scenario.business_data_steps or _convert_ag_ui_steps(scenario.ag_ui_steps)
         sequence_numbers = self._tracker.reserve_ag_ui_sequences(
             incoming.conversation_id,
-            len(scenario.ag_ui_steps),
+            len(steps),
         )
         replay_output = should_replay(incoming)
-        for step, sequence in zip(scenario.ag_ui_steps, sequence_numbers, strict=True):
-            message = build_ag_ui_message(
+        for step, sequence in zip(steps, sequence_numbers, strict=True):
+            message = build_business_data_message(
                 incoming,
                 step=replace(step, sequence=sequence),
                 now_ms=_now_ms(),
@@ -123,18 +126,19 @@ class AgentMqMockRunner:
             )
             await self._publisher.publish(message)
             logger.info(
-                "mock_ag_ui_published",
+                "mock_business_data_published",
                 extra={
                     "conversation_id": incoming.conversation_id,
                     "message_id": incoming.message_id,
                     "sequence": step.sequence,
+                    "schema_type": step.schema_type,
                     "scenario_id": scenario.scenario_id,
                 },
             )
             if replay_output:
                 await self._publisher.publish(message)
                 logger.info(
-                    "mock_ag_ui_replayed",
+                    "mock_business_data_replayed",
                     extra={
                         "conversation_id": incoming.conversation_id,
                         "message_id": incoming.message_id,
@@ -159,3 +163,46 @@ async def _sleep_ms(delay_ms: int) -> None:
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _convert_ag_ui_steps(steps: tuple[AgUiStep, ...]) -> tuple[BusinessDataStep, ...]:
+    converted: list[BusinessDataStep] = []
+    for step in steps:
+        schema_type, data = _extract_business_data(step)
+        converted.append(
+            BusinessDataStep(
+                sequence=step.sequence,
+                content=step.content,
+                schema_type=schema_type,
+                data=data,
+            )
+        )
+    return tuple(converted)
+
+
+def _extract_business_data(step: AgUiStep) -> tuple[str, dict[str, Any]]:
+    for event in step.events:
+        if event.get("type") != "ACTIVITY_SNAPSHOT":
+            continue
+        content = event.get("content")
+        if not isinstance(content, dict):
+            continue
+        meta = content.get("meta")
+        if not isinstance(meta, dict):
+            continue
+        intent = meta.get("intent")
+        if intent == "result":
+            return ("plan_candidates", {"heading": step.content, "candidates": [{"candidate_option_id": "a", "title": step.content, "summary": step.content, "recommendation_level": "recommended", "risk_level": "medium"}]})
+        if intent == "progress":
+            return ("progress_report", {"heading": step.content, "stage": "processing", "steps": [{"step_id": "1", "label": step.content, "status": "running"}]})
+        if intent == "clarification":
+            return ("clarification_request", {"question": step.content, "options": [{"option_id": "1", "label": step.content}]})
+        if intent == "tool_call":
+            return ("text_message", {"text": step.content})
+    for event in step.events:
+        if event.get("type") == "ACTIVITY_DELTA":
+            patch = event.get("content", {}).get("patch", [])
+            return ("incremental_update", {"target_block_id": "unknown", "patch": patch})
+        if event.get("type") in ("TEXT_MESSAGE_START", "TEXT_MESSAGE_CONTENT", "TEXT_MESSAGE_END"):
+            return ("text_message", {"text": step.content})
+    return ("text_message", {"text": step.content})
