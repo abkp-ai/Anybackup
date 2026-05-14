@@ -43,7 +43,7 @@ from app.infrastructure.persistence.sqlalchemy.session import (
 )
 from app.infrastructure.persistence.sqlalchemy.unit_of_work import SqlAlchemyUnitOfWork
 from app.interfaces.mq.agent_status_consumer import RabbitMqCoreAgentStatusConsumer
-from app.interfaces.mq.decision_agent_ag_ui_consumer import RabbitMqDecisionAgentAgUiConsumer
+from app.interfaces.mq.decision_agent_ag_ui_consumer import RabbitMqDecisionAgentBizdataConsumer
 from app.interfaces.mq.core_agent_kweaver_consumer import RabbitMqCoreAgentKweaverConsumer
 
 
@@ -198,13 +198,13 @@ class Container(containers.DeclarativeContainer):
         prefetch_count=settings.provided.core_agent_status_prefetch_count,
         handler=core_agent_status_handler,
     )
-    decision_agent_ag_ui_consumer = providers.Singleton(
-        RabbitMqDecisionAgentAgUiConsumer,
+    decision_agent_bizdata_consumer = providers.Singleton(
+        RabbitMqDecisionAgentBizdataConsumer,
         rabbitmq_url=settings.provided.rabbitmq_url,
-        exchange_name=settings.provided.decision_agent_ag_ui_exchange,
-        queue_name=settings.provided.decision_agent_ag_ui_queue,
-        routing_key=settings.provided.decision_agent_ag_ui_routing_key,
-        prefetch_count=settings.provided.decision_agent_ag_ui_prefetch_count,
+        exchange_name=settings.provided.decision_agent_bizdata_exchange,
+        queue_name=settings.provided.decision_agent_bizdata_queue,
+        routing_key=settings.provided.decision_agent_bizdata_routing_key,
+        prefetch_count=settings.provided.decision_agent_bizdata_prefetch_count,
         converter=business_data_converter,
     )
     core_agent_kweaver_consumer = providers.Singleton(

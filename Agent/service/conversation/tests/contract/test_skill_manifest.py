@@ -35,7 +35,7 @@ def test_skill_manifest_capability_catalog_is_complete() -> None:
     assert {
         "conversation.create",
         "conversation.message.send",
-        "conversation.decision_agent.ag_ui.publish",
+        "conversation.decision_agent.bizdata.publish",
         "conversation.candidate_selection.submit",
         "conversation.archive",
         "conversation.restore",
@@ -49,9 +49,9 @@ def test_skill_manifest_capability_catalog_is_complete() -> None:
         assert capability["auth_requirement"]["permission_model"] == "unified_backup_admin"
         assert capability["compatibility"]["api_prefix"] == API_PREFIX
 
-    ag_ui_publish = capabilities["conversation.decision_agent.ag_ui.publish"]
-    assert ag_ui_publish["return_schema"] == "ConversationMessage.rich_payload.ag_ui"
-    assert ag_ui_publish["compatibility"]["supports_markdown_ag_ui"] is True
+    bizdata_publish = capabilities["conversation.decision_agent.bizdata.publish"]
+    assert bizdata_publish["return_schema"] == "ConversationMessage.business_data"
+    assert bizdata_publish["compatibility"]["supports_markdown_ag_ui"] is True
 
 
 def test_skill_manifest_does_not_publish_out_of_scope_foundation_capability() -> None:

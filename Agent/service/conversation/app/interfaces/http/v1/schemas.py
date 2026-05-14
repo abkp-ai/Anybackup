@@ -219,6 +219,7 @@ class ConversationStatusEventResponse(StrictSchema):
         "conversation.archived",
         "conversation.restored",
         "conversation.expired",
+        "conversation.config_copied",
         "error",
     ]
     sequence: int

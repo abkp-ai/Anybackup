@@ -20,10 +20,10 @@ class Settings(BaseSettings):
     core_agent_status_exchange: str = "core_agent.run_status.events"
     core_agent_status_queue: str = "conversation.core_agent.run_status"
     core_agent_status_prefetch_count: int = Field(default=10, ge=1, le=1000)
-    decision_agent_ag_ui_exchange: str = "decision_agent.ag_ui.events"
-    decision_agent_ag_ui_queue: str = "conversation.decision_agent.ag_ui"
-    decision_agent_ag_ui_routing_key: str = "decision_agent.session.business_data.v1"
-    decision_agent_ag_ui_prefetch_count: int = Field(default=10, ge=1, le=1000)
+    decision_agent_bizdata_exchange: str = "decision_agent.bizdata.events"
+    decision_agent_bizdata_queue: str = "conversation.decision_agent.bizdata"
+    decision_agent_bizdata_routing_key: str = "decision_agent.session.business_data.v1"
+    decision_agent_bizdata_prefetch_count: int = Field(default=10, ge=1, le=1000)
     core_agent_kweaver_exchange: str = "core_agent.kweaver.stream"
     core_agent_kweaver_queue: str = "conversation.core_agent.kweaver"
     core_agent_kweaver_routing_key: str = "core_agent.kweaver.stream_event.v1"

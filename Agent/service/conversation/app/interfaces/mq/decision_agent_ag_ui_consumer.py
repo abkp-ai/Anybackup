@@ -11,8 +11,8 @@ from app.infrastructure.messaging.rabbitmq.publisher import decode_message_body
 
 logger = logging.getLogger(__name__)
 
-DECISION_AGENT_AG_UI_EXCHANGE = "decision_agent.ag_ui.events"
-DECISION_AGENT_AG_UI_ROUTING_KEY = "decision_agent.session.business_data.v1"
+DECISION_AGENT_BIZDATA_EXCHANGE = "decision_agent.bizdata.events"
+DECISION_AGENT_BIZDATA_ROUTING_KEY = "decision_agent.session.business_data.v1"
 
 
 class IncomingMessage(Protocol):
@@ -25,7 +25,7 @@ class IncomingMessage(Protocol):
         raise NotImplementedError
 
 
-class DecisionAgentAgUiMessageConsumer:
+class DecisionAgentBizdataMessageConsumer:
     def __init__(self, *, converter: BusinessDataToAgUiConverter) -> None:
         self._converter = converter
 
@@ -43,33 +43,33 @@ class DecisionAgentAgUiMessageConsumer:
             await self._converter.process_business_data(command)
             await message.ack()
         except Exception:
-            logger.exception("decision_agent_ag_ui_consume_failed")
+            logger.exception("decision_agent_bizdata_consume_failed")
             await message.reject(requeue=False)
 
 
-class RabbitMqDecisionAgentAgUiConsumer:
+class RabbitMqDecisionAgentBizdataConsumer:
     def __init__(
         self,
         *,
         rabbitmq_url: str,
-        exchange_name: str = DECISION_AGENT_AG_UI_EXCHANGE,
+        exchange_name: str = DECISION_AGENT_BIZDATA_EXCHANGE,
         queue_name: str,
         prefetch_count: int,
         converter: BusinessDataToAgUiConverter,
-        routing_key: str = DECISION_AGENT_AG_UI_ROUTING_KEY,
+        routing_key: str = DECISION_AGENT_BIZDATA_ROUTING_KEY,
     ) -> None:
         self._rabbitmq_url = rabbitmq_url
         self._exchange_name = exchange_name
         self._queue_name = queue_name
         self._prefetch_count = prefetch_count
         self._routing_key = routing_key
-        self._message_consumer = DecisionAgentAgUiMessageConsumer(converter=converter)
+        self._message_consumer = DecisionAgentBizdataMessageConsumer(converter=converter)
         self._connection: aio_pika.abc.AbstractRobustConnection | None = None
         self._channel: aio_pika.abc.AbstractChannel | None = None
 
     async def start(self) -> None:
         logger.info(
-            "decision_agent_ag_ui_consumer_start_enter",
+            "decision_agent_bizdata_consumer_start_enter",
             extra={"queue_name": self._queue_name, "prefetch_count": self._prefetch_count},
         )
         connection = await aio_pika.connect_robust(self._rabbitmq_url)
@@ -96,7 +96,7 @@ class RabbitMqDecisionAgentAgUiConsumer:
 def _command_from_body(body: dict[str, Any]) -> DecisionAgentBusinessDataCommand:
     payload = body.get("payload")
     if not isinstance(payload, dict):
-        raise ValueError("decision agent AG-UI payload must be an object")
+        raise ValueError("decision agent business data payload must be an object")
 
     business_data = payload.get("business_data")
     if not isinstance(business_data, dict):

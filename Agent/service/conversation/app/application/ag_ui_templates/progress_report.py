@@ -1,14 +1,29 @@
 from typing import Any
 
 from app.application.ag_ui_templates.layout_nodes import (
+    action_row,
+    badge_row,
     callout,
+    chart,
     heading,
+    kv_list,
     metric_list,
     paragraph,
     section,
     stack,
 )
 from app.application.ag_ui_templates.base import AgUiTemplate, AgUiTemplateResult
+
+_STEP_STATUS_TONE = {
+    "completed": "positive",
+    "done": "positive",
+    "in_progress": "info",
+    "running": "info",
+    "failed": "danger",
+    "error": "danger",
+    "pending": "neutral",
+    "skipped": "warning",
+}
 
 
 class ProgressReportTemplate(AgUiTemplate):
@@ -32,21 +47,52 @@ class ProgressReportTemplate(AgUiTemplate):
             ui_children.append(section([metric_list(metrics)]))
 
         if progress_percent is not None:
-            ui_children.append(section([paragraph(f"Progress: {progress_percent}%")]))
+            ui_children.append(section([chart(
+                items=[{"label": "Progress", "value": progress_percent, "tone": "positive"}],
+                title=f"Progress: {progress_percent}%",
+            )]))
 
         if steps:
-            step_items = []
+            step_badges: list[dict[str, str]] = []
             for step in steps:
                 status = step.get("status", "pending")
                 label = step.get("label", step.get("step_id", ""))
-                step_items.append(f"[{status}] {label}")
-            ui_children.append(section([paragraph("\n".join(step_items))]))
+                tone = _STEP_STATUS_TONE.get(status, "neutral")
+                step_badges.append({"text": f"{label}: {status}", "tone": tone})
+            ui_children.append(section([badge_row(step_badges)]))
 
         if eta:
             ui_children.append(section([paragraph(f"Estimated time: {eta}")]))
 
+        # 通用扩展：error
+        error = data.get("error")
+        if error:
+            ui_children.append(callout(
+                error.get("message", str(error)),
+                tone=error.get("tone", "danger"),
+                title=error.get("title"),
+            ))
+
+        # 通用扩展：callouts
+        for c in data.get("callouts") or []:
+            ui_children.append(callout(c["text"], tone=c.get("tone", "warning"), title=c.get("title")))
+
+        # 通用扩展：metadata
+        report_metadata = data.get("metadata")
+        if report_metadata:
+            ui_children.append(section([kv_list(report_metadata)]))
+
+        # 通用扩展：extra_actions
+        extra_actions = data.get("extra_actions")
+        if extra_actions:
+            action_ids = [a["id"] for a in extra_actions if "id" in a]
+            if action_ids:
+                ui_children.append(action_row(action_ids))
+
         ui = stack(ui_children, gap="md")
         meta: dict[str, Any] = {"intent": "progress", "terminal": False}
+
+        actions = extra_actions if extra_actions else None
 
         return AgUiTemplateResult(
             activity_content={
@@ -54,6 +100,8 @@ class ProgressReportTemplate(AgUiTemplate):
                 "blockId": f"progress-{heading_text}",
                 "ui": ui,
                 "meta": meta,
+                **({"actions": actions} if actions else {}),
             },
             meta=meta,
+            actions=actions,
         )

@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-DEFAULT_CORE_STATUS_QUEUE = "conversation.core_agent.status.v1"
-DEFAULT_AG_UI_EXCHANGE = "decision_agent.ag_ui.events"
-DEFAULT_AG_UI_ROUTING_KEY = "decision_agent.session.business_data.v1"
+DEFAULT_CORE_STATUS_QUEUE = "conversation.core_agent.run_status"
+DEFAULT_BIZDATA_EXCHANGE = "decision_agent.bizdata.events"
+DEFAULT_BIZDATA_ROUTING_KEY = "decision_agent.session.business_data.v1"
+DEFAULT_KWEAVER_EXCHANGE = "core_agent.kweaver.stream"
+DEFAULT_KWEAVER_ROUTING_KEY = "core_agent.kweaver.stream_event.v1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,10 +75,18 @@ class BusinessDataStep:
     data: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class KweaverStep:
+    sequence: int
+    content: str
+    kweaver_event: dict[str, Any]
+    chunk_index: int = 0
+
+
 def build_core_status_message(
     incoming: IncomingConversationMessage,
     *,
-    kind: Literal["accepted", "rejected", "failed"],
+    kind: Literal["accepted", "rejected", "failed", "completed"],
     core_agent_run_id: str,
     now_ms: int,
     status_queue: str = DEFAULT_CORE_STATUS_QUEUE,
@@ -95,6 +105,11 @@ def build_core_status_message(
             "input_event_id": incoming.event_id,
             "core_agent_run_id": core_agent_run_id,
             "estimated_status": "processing",
+        }
+    elif kind == "completed":
+        payload["content"] = incoming.content
+        payload["completed"] = {
+            "core_agent_run_id": core_agent_run_id,
         }
     else:
         payload[kind] = {
@@ -124,14 +139,14 @@ def build_ag_ui_message(
     *,
     step: AgUiStep,
     now_ms: int,
-    exchange: str = DEFAULT_AG_UI_EXCHANGE,
-    routing_key: str = DEFAULT_AG_UI_ROUTING_KEY,
+    exchange: str = DEFAULT_BIZDATA_EXCHANGE,
+    routing_key: str = DEFAULT_BIZDATA_ROUTING_KEY,
     source_service: str = "decision_agent_session",
 ) -> OutgoingMqMessage:
-    event_id = f"decision-agent.ag-ui.{incoming.message_id}.{step.sequence}"
+    event_id = f"decision-agent.bizdata.{incoming.message_id}.{step.sequence}"
     body = {
         "event_id": event_id,
-        "event_type": "decision_agent.session.ag_ui_event",
+        "event_type": "decision_agent.session.business_data",
         "occurred_at": _ms_to_iso(now_ms),
         "source_service": source_service,
         "trace_id": incoming.trace_id,
@@ -158,8 +173,8 @@ def build_business_data_message(
     *,
     step: BusinessDataStep,
     now_ms: int,
-    exchange: str = DEFAULT_AG_UI_EXCHANGE,
-    routing_key: str = DEFAULT_AG_UI_ROUTING_KEY,
+    exchange: str = DEFAULT_BIZDATA_EXCHANGE,
+    routing_key: str = DEFAULT_BIZDATA_ROUTING_KEY,
     source_service: str = "decision_agent_session",
 ) -> OutgoingMqMessage:
     event_id = f"decision-agent.bizdata.{incoming.message_id}.{step.sequence}"
@@ -191,6 +206,41 @@ def build_business_data_message(
     )
 
 
+def build_kweaver_message(
+    incoming: IncomingConversationMessage,
+    *,
+    step: KweaverStep,
+    core_agent_run_id: str,
+    now_ms: int,
+    exchange: str = DEFAULT_KWEAVER_EXCHANGE,
+    routing_key: str = DEFAULT_KWEAVER_ROUTING_KEY,
+    source_service: str = "core_agent",
+) -> OutgoingMqMessage:
+    event_id = f"core-agent.kweaver.{incoming.message_id}.{step.sequence}"
+    body = {
+        "event_id": event_id,
+        "event_type": "core_agent.kweaver.stream_event",
+        "occurred_at": _ms_to_iso(now_ms),
+        "source_service": source_service,
+        "trace_id": incoming.trace_id,
+        "correlation_id": incoming.correlation_id,
+        "payload": {
+            "conversation_id": incoming.conversation_id,
+            "turn_id": incoming.turn_id,
+            "message_id": _assistant_output_message_id(incoming),
+            "run_id": core_agent_run_id,
+            "chunk_index": step.chunk_index,
+            "kweaver_event": step.kweaver_event,
+        },
+    }
+    return OutgoingMqMessage(
+        body=body,
+        exchange=exchange,
+        routing_key=routing_key,
+        headers=_headers(incoming.trace_id, incoming.correlation_id),
+    )
+
+
 def _headers(trace_id: str, correlation_id: str) -> dict[str, str]:
     headers = {
         "trace_id": trace_id,
@@ -208,7 +258,7 @@ def _traceparent(trace_id: str) -> str:
 
 
 def _ms_to_iso(value: int) -> str:
-    return datetime.fromtimestamp(value / 1000, UTC).isoformat().replace("+00:00", "Z")
+    return datetime.fromtimestamp(value / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _assistant_output_message_id(incoming: IncomingConversationMessage) -> str:

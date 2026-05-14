@@ -23,8 +23,19 @@ def paragraph(text: str) -> dict[str, Any]:
     return {"type": "paragraph", "props": {"text": text}}
 
 
-def card(children: list[dict[str, Any]], *, node_id: str | None = None) -> dict[str, Any]:
-    node: dict[str, Any] = {"type": "card", "props": {"children": children}}
+def card(
+    children: list[dict[str, Any]],
+    *,
+    node_id: str | None = None,
+    title: str | None = None,
+    tone: str | None = None,
+) -> dict[str, Any]:
+    props: dict[str, Any] = {"children": children}
+    if title is not None:
+        props["title"] = title
+    if tone is not None:
+        props["tone"] = tone
+    node: dict[str, Any] = {"type": "card", "props": props}
     if node_id is not None:
         node["id"] = node_id
     return node
@@ -40,22 +51,39 @@ def metric_list(metrics: list[dict[str, Any]]) -> dict[str, Any]:
     return {"type": "metric-list", "props": {"items": items}}
 
 
-def data_table(headers: list[str], rows: list[list[str | int | float]]) -> dict[str, Any]:
+def data_table(
+    columns: list[dict[str, str]],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    cols = [{"key": c["key"], "label": c["label"]} for c in columns]
     return {
         "type": "data-table",
         "props": {
-            "headers": [{"label": h} for h in headers],
-            "rows": [{"cells": [str(c) for c in row]} for row in rows],
+            "columns": cols,
+            "rows": rows,
         },
     }
 
 
-def chart(data: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "chart", "props": data}
+def chart(
+    items: list[dict[str, Any]],
+    *,
+    title: str | None = None,
+    chart_type: str | None = None,
+) -> dict[str, Any]:
+    props: dict[str, Any] = {"items": items}
+    if title is not None:
+        props["title"] = title
+    if chart_type is not None:
+        props["chartType"] = chart_type
+    return {"type": "chart", "props": props}
 
 
-def callout(text: str, *, tone: str = "warning") -> dict[str, Any]:
-    return {"type": "callout", "props": {"text": text, "tone": tone}}
+def callout(text: str, *, tone: str = "warning", title: str | None = None) -> dict[str, Any]:
+    props: dict[str, Any] = {"text": text, "tone": tone}
+    if title is not None:
+        props["title"] = title
+    return {"type": "callout", "props": props}
 
 
 def action_row(action_ids: list[str]) -> dict[str, Any]:
@@ -81,7 +109,32 @@ def attachment_list(attachments: list[dict[str, Any]]) -> dict[str, Any]:
             "filename": a["filename"],
             "size": str(a["size"]),
             "downloadUrl": a["download_url"],
+            "title": a.get("title", a["filename"]),
+            "text": a["filename"],
+            "summary": a.get("summary", f"{a['size']} bytes"),
         }
         for a in attachments
     ]
     return {"type": "attachment-list", "props": {"items": items}}
+
+
+def tabs(
+    children: list[dict[str, Any]],
+    *,
+    items: list[dict[str, str]] | None = None,
+    default_tab_id: str | None = None,
+    node_id: str | None = None,
+) -> dict[str, Any]:
+    props: dict[str, Any] = {"children": children}
+    if items is not None:
+        props["items"] = items
+    if default_tab_id is not None:
+        props["defaultTabId"] = default_tab_id
+    node: dict[str, Any] = {"type": "tabs", "props": props}
+    if node_id is not None:
+        node["id"] = node_id
+    return node
+
+
+def divider() -> dict[str, Any]:
+    return {"type": "divider"}

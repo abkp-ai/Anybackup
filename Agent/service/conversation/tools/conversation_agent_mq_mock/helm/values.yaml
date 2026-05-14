@@ -11,13 +11,13 @@ nameOverride: ""
 fullnameOverride: ""
 
 config:
-  conversationExchange: conversation.agent.events
+  conversationExchange: conversation.message.events
   conversationRoutingKey: conversation.message.sent.v1
   mockInputQueue: core-agent-mock.message.events
-  coreStatusQueue: conversation.core_agent.status.v1
-  aguiExchange: decision_agent.ag_ui.events
-  aguiRoutingKey: decision_agent.session.ag_ui_event.v1
-  aguiQueue: conversation.decision_agent.ag_ui
+  coreStatusQueue: conversation.core_agent.run_status
+  bizdataExchange: decision_agent.bizdata.events
+  bizdataRoutingKey: decision_agent.session.business_data.v1
+  bizdataQueue: conversation.decision_agent.bizdata
   mockDelayMs: 800
   mockPrefetchCount: 10
   workerId: conversation-agent-mq-mock

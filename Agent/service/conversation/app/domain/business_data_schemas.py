@@ -25,6 +25,12 @@ class PlanCandidateItem(BaseModel):
     summary: str
     recommendation_level: str = "alternative"
     risk_level: str = "medium"
+    # 通用扩展
+    badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
+    callouts: list[dict[str, Any]] | None = None
+    card_tone: str | None = None
+    # 向后兼容（deprecated → 使用 metadata / callouts）
     rpo: str | None = None
     rto: str | None = None
     target: str | None = None
@@ -38,6 +44,9 @@ class PlanCandidatesData(BaseModel):
     subtitle: str | None = None
     candidates: list[PlanCandidateItem] = Field(min_length=1)
     selection: dict[str, Any] | None = None
+    # 通用扩展
+    header_badges: list[dict[str, str]] | None = None
+    header_metadata: list[dict[str, str]] | None = None
     meta: dict[str, Any] | None = None
 
 
@@ -48,6 +57,9 @@ class ProgressStep(BaseModel):
     step_id: str
     label: str
     status: str = "pending"
+    # 通用扩展
+    badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
 
 
 class ProgressMetric(BaseModel):
@@ -64,6 +76,11 @@ class ProgressReportData(BaseModel):
     progress_percent: int | float | None = None
     eta: str | None = None
     metrics: list[ProgressMetric] | None = None
+    # 通用扩展
+    error: dict[str, Any] | None = None
+    callouts: list[dict[str, Any]] | None = None
+    extra_actions: list[dict[str, Any]] | None = None
+    metadata: list[dict[str, str]] | None = None
     meta: dict[str, Any] | None = None
 
 
@@ -74,6 +91,12 @@ class ClarificationOption(BaseModel):
     option_id: str
     label: str
     description: str | None = None
+    # 通用扩展
+    is_recommended: bool | None = None
+    badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
+    callouts: list[dict[str, Any]] | None = None
+    card_tone: str | None = None
 
 
 class ClarificationRequestData(BaseModel):
@@ -81,6 +104,9 @@ class ClarificationRequestData(BaseModel):
     options: list[ClarificationOption] = Field(min_length=1)
     context: str | None = None
     selection: dict[str, Any] | None = None
+    # 通用扩展
+    allows_free_text: bool | None = None
+    free_text_placeholder: str | None = None
     meta: dict[str, Any] | None = None
 
 
@@ -99,10 +125,24 @@ class CapacityWarning(BaseModel):
     message: str
 
 
+class ForecastData(BaseModel):
+    items: list[dict[str, Any]] | None = None
+    columns: list[dict[str, str]] | None = None
+    rows: list[dict[str, Any]] | None = None
+    chart_type: str | None = None
+    title: str | None = None
+
+
 class CapacityForecastData(BaseModel):
     metrics: list[CapacityMetric] = Field(min_length=1)
-    forecast: dict[str, Any] | None = None
+    forecast: ForecastData | dict[str, Any] | None = None
     warnings: list[CapacityWarning] | None = None
+    # 通用扩展
+    header_badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
+    callouts: list[dict[str, Any]] | None = None
+    extra_actions: list[dict[str, Any]] | None = None
+    block_id_suffix: str | None = None
     meta: dict[str, Any] | None = None
 
 
@@ -114,12 +154,21 @@ class AttachmentItem(BaseModel):
     filename: str
     size: int | str
     download_url: str
+    # 通用扩展
+    title: str | None = None
+    summary: str | None = None
+    badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
+    card_tone: str | None = None
 
 
 class AttachmentListData(BaseModel):
     heading: str
     subtitle: str | None = None
     attachments: list[AttachmentItem] = Field(min_length=1)
+    # 通用扩展
+    header_badges: list[dict[str, str]] | None = None
+    meta: dict[str, Any] | None = None
 
 
 # --- report_detail ---
@@ -129,6 +178,11 @@ class ReportSection(BaseModel):
     section_id: str
     title: str
     content: str | dict[str, Any] | None = None
+    # 通用扩展
+    section_type: str | None = None
+    layout_nodes: list[dict[str, Any]] | None = None
+    badges: list[dict[str, str]] | None = None
+    callouts: list[dict[str, Any]] | None = None
 
 
 class ReportDetailData(BaseModel):
@@ -136,6 +190,11 @@ class ReportDetailData(BaseModel):
     subtitle: str | None = None
     summary: str | None = None
     sections: list[ReportSection] | None = None
+    # 通用扩展
+    header_badges: list[dict[str, str]] | None = None
+    metadata: list[dict[str, str]] | None = None
+    navigation: list[dict[str, str]] | None = None
+    use_tabs: bool | None = None
     meta: dict[str, Any] | None = None
 
 
@@ -145,6 +204,9 @@ class ReportDetailData(BaseModel):
 class TextMessageData(BaseModel):
     text: str
     format_hint: str | None = None
+    # 通用扩展
+    badges: list[dict[str, str]] | None = None
+    meta: dict[str, Any] | None = None
 
 
 # --- incremental_update ---
@@ -154,6 +216,9 @@ class IncrementalUpdateData(BaseModel):
     target_block_id: str
     patch: list[dict[str, Any]] = Field(min_length=1)
     operation: Literal["replace", "merge", "patch"] | None = None
+    # 通用扩展
+    patch_type: str | None = None
+    version: int | None = None
 
 
 # --- Registry ---

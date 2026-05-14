@@ -37,7 +37,7 @@ class MockMessageTests(unittest.TestCase):
             now_ms=1_800_000_000_100,
         )
 
-        self.assertEqual(message.routing_key, "conversation.core_agent.status.v1")
+        self.assertEqual(message.routing_key, "conversation.core_agent.run_status")
         self.assertEqual(message.body["event_type"], "core_agent.run.accepted")
         self.assertEqual(message.body["event_version"], "v1")
         self.assertEqual(message.body["trace_id"], "trace-001")
@@ -72,9 +72,9 @@ class MockMessageTests(unittest.TestCase):
 
         message = build_ag_ui_message(incoming, step=step, now_ms=1_800_000_001_000)
 
-        self.assertEqual(message.exchange, "decision_agent.ag_ui.events")
-        self.assertEqual(message.routing_key, "decision_agent.session.ag_ui_event.v1")
-        self.assertEqual(message.body["event_type"], "decision_agent.session.ag_ui_event")
+        self.assertEqual(message.exchange, "decision_agent.bizdata.events")
+        self.assertEqual(message.routing_key, "decision_agent.session.business_data.v1")
+        self.assertEqual(message.body["event_type"], "decision_agent.session.business_data")
         self.assertEqual(message.body["source_service"], "decision_agent_session")
         self.assertEqual(message.body["payload"]["conversation_id"], "101")
         self.assertEqual(message.body["payload"]["sequence"], 1)
@@ -503,7 +503,7 @@ class MockMessageTests(unittest.TestCase):
         sequences = [
             message.body["payload"]["sequence"]
             for message in publisher.messages
-            if message.exchange == "decision_agent.ag_ui.events"
+            if message.exchange == "decision_agent.bizdata.events"
         ]
         self.assertEqual(sequences, [1, 2, 3, 4])
 
@@ -536,7 +536,7 @@ class MockMessageTests(unittest.TestCase):
         event_ids = [
             message.body["event_id"]
             for message in publisher.messages
-            if message.exchange == "decision_agent.ag_ui.events"
+            if message.exchange == "decision_agent.bizdata.events"
         ]
         self.assertGreater(len(event_ids), len(set(event_ids)))
 

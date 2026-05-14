@@ -3,13 +3,13 @@ import pytest
 from app.application.commands.agent_events import DecisionAgentBusinessDataCommand
 from app.interfaces.mq import decision_agent_ag_ui_consumer
 from app.interfaces.mq.decision_agent_ag_ui_consumer import (
-    RabbitMqDecisionAgentAgUiConsumer,
+    RabbitMqDecisionAgentBizdataConsumer,
     _command_from_body,
 )
 
 
 @pytest.mark.asyncio
-async def test_ag_ui_consumer_binds_decision_agent_exchange(monkeypatch) -> None:
+async def test_bizdata_consumer_binds_decision_agent_exchange(monkeypatch) -> None:
     connection = FakeConnection()
 
     async def fake_connect_robust(url: str) -> FakeConnection:
@@ -21,10 +21,10 @@ async def test_ag_ui_consumer_binds_decision_agent_exchange(monkeypatch) -> None
         "connect_robust",
         fake_connect_robust,
     )
-    consumer = RabbitMqDecisionAgentAgUiConsumer(
+    consumer = RabbitMqDecisionAgentBizdataConsumer(
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
-        exchange_name="decision_agent.ag_ui.events",
-        queue_name="conversation.decision_agent.ag_ui",
+        exchange_name="decision_agent.bizdata.events",
+        queue_name="conversation.decision_agent.bizdata",
         prefetch_count=10,
         converter=NoopConverter(),
     )
@@ -34,14 +34,14 @@ async def test_ag_ui_consumer_binds_decision_agent_exchange(monkeypatch) -> None
     assert connection.url == "amqp://guest:guest@localhost:5672/"
     assert connection.channel_instance.qos_calls == [10]
     assert connection.channel_instance.declared_exchanges == [
-        {"name": "decision_agent.ag_ui.events", "durable": True}
+        {"name": "decision_agent.bizdata.events", "durable": True}
     ]
     assert connection.channel_instance.declared_queues == [
-        {"name": "conversation.decision_agent.ag_ui", "durable": True}
+        {"name": "conversation.decision_agent.bizdata", "durable": True}
     ]
     assert connection.channel_instance.queue.bind_calls == [
         {
-            "exchange": "decision_agent.ag_ui.events",
+            "exchange": "decision_agent.bizdata.events",
             "routing_key": "decision_agent.session.business_data.v1",
         }
     ]

@@ -50,12 +50,12 @@ spec:
               value: {{ .Values.config.mockInputQueue | quote }}
             - name: CORE_STATUS_QUEUE
               value: {{ .Values.config.coreStatusQueue | quote }}
-            - name: AGUI_EXCHANGE
-              value: {{ .Values.config.aguiExchange | quote }}
-            - name: AGUI_ROUTING_KEY
-              value: {{ .Values.config.aguiRoutingKey | quote }}
-            - name: AGUI_QUEUE
-              value: {{ .Values.config.aguiQueue | quote }}
+            - name: BIZDATA_EXCHANGE
+              value: {{ .Values.config.bizdataExchange | quote }}
+            - name: BIZDATA_ROUTING_KEY
+              value: {{ .Values.config.bizdataRoutingKey | quote }}
+            - name: BIZDATA_QUEUE
+              value: {{ .Values.config.bizdataQueue | quote }}
             - name: MOCK_DELAY_MS
               value: {{ .Values.config.mockDelayMs | quote }}
             - name: MOCK_PREFETCH_COUNT

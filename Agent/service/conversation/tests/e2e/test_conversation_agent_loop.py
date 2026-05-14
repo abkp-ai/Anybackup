@@ -355,7 +355,7 @@ async def _consume_mock_messages(
         incoming = FakeIncomingMessage(body)
         if getattr(message, "routing_key", "") == "conversation.core_agent.run_status":
             await core_consumer.process_message(incoming)
-        elif getattr(message, "exchange", None) == "decision_agent.ag_ui.events":
+        elif getattr(message, "exchange", None) == "decision_agent.bizdata.events":
             await ag_ui_consumer.process_message(incoming)
         else:
             raise AssertionError(f"unexpected mock output message: {message!r}")

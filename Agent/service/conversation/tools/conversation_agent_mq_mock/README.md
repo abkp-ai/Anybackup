@@ -5,36 +5,36 @@ This mock supports frontend and Conversation Service integration while Core Agen
 It consumes Conversation Service MQ messages and publishes:
 
 - Core status messages to `conversation.core_agent.status.v1`.
-- AG-UI MQ messages to `decision_agent.ag_ui.events` with routing key `decision_agent.session.ag_ui_event.v1`.
+- Business data MQ messages to `decision_agent.bizdata.events` with routing key `decision_agent.session.business_data.v1`.
 
 The mock follows the current implemented Conversation Service runtime contract for status events:
 
-- Input exchange: `conversation.agent.events`
+- Input exchange: `conversation.message.events`
 - Input routing key: `conversation.message.sent.v1`
 - Input payload must include `conversation_id`, source user `message_id`, `turn_id`,
-  and `content`. The mock generates AG-UI output `message_id` itself.
+  and `content`. The mock generates business data output `message_id` itself.
 - Accepted event: `core_agent.run.accepted`
 - Rejected event: `core_agent.run.rejected`
 - Failed event: `core_agent.run.failed`
 
-AG-UI output follows the formal MQ contract:
+Business data output follows the formal MQ contract:
 
-- Exchange: `decision_agent.ag_ui.events`
-- Routing key: `decision_agent.session.ag_ui_event.v1`
-- Event type: `decision_agent.session.ag_ui_event`
+- Exchange: `decision_agent.bizdata.events`
+- Routing key: `decision_agent.session.business_data.v1`
+- Event type: `decision_agent.session.business_data`
 
 ## Configuration
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
 | `RABBITMQ_URL` | required | RabbitMQ connection string. |
-| `CONVERSATION_EXCHANGE` | `conversation.agent.events` | Exchange published by Conversation Service. |
+| `CONVERSATION_EXCHANGE` | `conversation.message.events` | Exchange published by Conversation Service. |
 | `CONVERSATION_ROUTING_KEY` | `conversation.message.sent.v1` | Routing key to consume. |
 | `MOCK_INPUT_QUEUE` | `core-agent-mock.message.events` | Durable queue owned by this mock. |
-| `CORE_STATUS_QUEUE` | `conversation.core_agent.status.v1` | Queue consumed by Conversation Service status consumer. |
-| `AGUI_EXCHANGE` | `decision_agent.ag_ui.events` | AG-UI output exchange. |
-| `AGUI_ROUTING_KEY` | `decision_agent.session.ag_ui_event.v1` | AG-UI output routing key. |
-| `AGUI_QUEUE` | `conversation.decision_agent.ag_ui` | Durable queue bound for AG-UI debug/consumer handoff. |
+| `CORE_STATUS_QUEUE` | `conversation.core_agent.run_status` | Queue consumed by Conversation Service status consumer. |
+| `BIZDATA_EXCHANGE` | `decision_agent.bizdata.events` | Business data output exchange. |
+| `BIZDATA_ROUTING_KEY` | `decision_agent.session.business_data.v1` | Business data output routing key. |
+| `BIZDATA_QUEUE` | `conversation.decision_agent.bizdata` | Durable queue bound for business data debug/consumer handoff. |
 | `MOCK_DELAY_MS` | `800` | Delay between simulated steps. |
 | `MOCK_PREFETCH_COUNT` | `10` | RabbitMQ consumer prefetch count. |
 

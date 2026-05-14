@@ -59,11 +59,11 @@ def _capabilities(api_prefix: str) -> list[dict[str, Any]]:
             idempotency_required=True,
         ),
         _mq_capability(
-            "conversation.decision_agent.ag_ui.publish",
-            "decision_agent.ag_ui.events",
-            "decision_agent.session.ag_ui_event.v1",
-            ["DecisionAgentAgUiEventEnvelope"],
-            "ConversationMessage.rich_payload.ag_ui",
+            "conversation.decision_agent.bizdata.publish",
+            "decision_agent.bizdata.events",
+            "decision_agent.session.business_data.v1",
+            ["DecisionAgentBusinessDataEnvelope"],
+            "ConversationMessage.business_data",
             api_prefix,
         ),
         _capability(

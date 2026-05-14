@@ -142,6 +142,17 @@ def _thought_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="text_message",
+                data={
+                    "text": summary,
+                    "badges": [{"text": "推理", "tone": "info"}],
+                },
+            ),
+        ),
     )
 
 
@@ -237,6 +248,17 @@ def _tool_call_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="text_message",
+                data={
+                    "text": summary,
+                    "badges": [{"text": "工具调用", "tone": "info"}],
+                },
+            ),
+        ),
     )
 
 
@@ -282,9 +304,11 @@ def _progress_scenario(
                                 ),
                                 _chart(
                                     "line",
-                                    x_axis=["Inventory", "Validation", "Comparison", "Finalize"],
-                                    series=[
-                                        {"name": "Completion", "data": [100, 100, 66, 0]},
+                                    data=[
+                                        {"label": "Inventory", "value": 100},
+                                        {"label": "Validation", "value": 100},
+                                        {"label": "Comparison", "value": 66},
+                                        {"label": "Finalize", "value": 0},
                                     ],
                                 ),
                                 _callout(
@@ -300,6 +324,37 @@ def _progress_scenario(
                     ),
                     _state(active_block_ids=[block_id]),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="progress_report",
+                data={
+                    "heading": "计划生成进度",
+                    "subtitle": "计划正在从恢复点数据、风险比较和执行约束中组装",
+                    "stage": "processing",
+                    "steps": [
+                        {"step_id": "1", "label": "清单盘点", "status": "completed", "badges": [{"text": "完成", "tone": "success"}]},
+                        {"step_id": "2", "label": "数据验证", "status": "completed", "badges": [{"text": "完成", "tone": "success"}]},
+                        {"step_id": "3", "label": "风险比较", "status": "in_progress", "badges": [{"text": "进行中", "tone": "info"}]},
+                        {"step_id": "4", "label": "最终确定", "status": "pending"},
+                    ],
+                    "progress_percent": 66,
+                    "eta": "约 40 秒",
+                    "metrics": [
+                        {"label": "已完成", "value": "66%", "unit": "%"},
+                        {"label": "当前步骤", "value": "风险比较"},
+                    ],
+                    "callouts": [
+                        {"text": "等待最终风险比较完成后再输出结果", "tone": "warning", "title": "等待中"},
+                    ],
+                    "metadata": [
+                        {"label": "恢复点", "value": "3 个可用"},
+                        {"label": "运行ID", "value": core_agent_run_id},
+                    ],
+                },
             ),
         ),
     )
@@ -402,8 +457,40 @@ def _clarifying_scenario(
                             "selectedCandidateOptionId": None,
                             "selectionLocked": False,
                         },
+                        status="clarifying",
                     ),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=prompt,
+                schema_type="clarification_request",
+                data={
+                    "question": "请确认目标恢复时间窗口",
+                    "context": "请求可以在确认恢复窗口后继续处理",
+                    "options": [
+                        {
+                            "option_id": "latest_safe_point",
+                            "label": "使用最新安全点",
+                            "description": "最近的可用恢复点，RPO 最小",
+                            "is_recommended": True,
+                            "badges": [{"text": "推荐", "tone": "success"}],
+                            "metadata": [{"label": "RPO", "value": "< 2 分钟"}],
+                        },
+                        {
+                            "option_id": "specific_timestamp",
+                            "label": "指定时间戳",
+                            "description": "选择特定时间点，如周五 15:30",
+                            "badges": [{"text": "自定义", "tone": "info"}],
+                            "callouts": [{"text": "更宽的窗口可能改变候选排名", "tone": "info"}],
+                            "card_tone": "highlight",
+                        },
+                    ],
+                    "allows_free_text": True,
+                    "free_text_placeholder": "输入自定义时间戳",
+                },
             ),
         ),
     )
@@ -589,8 +676,29 @@ def _restore_scenario(
                             "selectedCandidateOptionId": None,
                             "selectionLocked": False,
                         },
+                        status="completed",
                     ),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content="Understanding restore target and checking available restore points.",
+                schema_type="text_message",
+                data={"text": "正在分析恢复目标并检查可用恢复点...", "badges": [{"text": "推理", "tone": "info"}]},
+            ),
+            BusinessDataStep(
+                sequence=2,
+                content=f"Found restore point {restore_point} and two alternatives.",
+                schema_type="text_message",
+                data={"text": f"已找到恢复点 {restore_point} 及两个备选方案。", "badges": [{"text": "工具调用", "tone": "info"}]},
+            ),
+            BusinessDataStep(
+                sequence=3,
+                content=summary,
+                schema_type="plan_candidates",
+                data=_plan_candidates_data(candidates, reasoning_trace_id),
             ),
         ),
     )
@@ -639,13 +747,12 @@ def _capacity_scenario(
                                 ),
                                 _chart(
                                     "line",
-                                    x_axis=["D+0", "D+7", "D+14"],
-                                    series=[
-                                        {
-                                            "name": "Projected usage",
-                                            "data": [used_percent - 8, used_percent - 3, used_percent],
-                                        }
+                                    data=[
+                                        {"label": "D+0", "value": used_percent - 8},
+                                        {"label": "D+7", "value": used_percent - 3},
+                                        {"label": "D+14", "value": used_percent},
                                     ],
+                                    title="Projected usage",
                                 ),
                                 _data_table(
                                     [
@@ -698,6 +805,54 @@ def _capacity_scenario(
                     ),
                     _state(active_block_ids=[block_id]),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="capacity_forecast",
+                data={
+                    "metrics": [
+                        {"label": "生产存储池", "current": used_percent - 8, "capacity": 100, "unit": "%"},
+                        {"label": "备份存储池", "current": 54, "capacity": 100, "unit": "%"},
+                    ],
+                    "forecast": {
+                        "items": [
+                            {"label": "D+0", "value": used_percent - 8},
+                            {"label": "D+7", "value": used_percent - 3},
+                            {"label": "D+14", "value": used_percent},
+                        ],
+                        "columns": [
+                            {"key": "pool", "label": "存储池"},
+                            {"key": "current", "label": "当前用量"},
+                            {"key": "d14", "label": "14日预测"},
+                            {"key": "risk", "label": "风险"},
+                        ],
+                        "rows": [
+                            {"pool": "primary-ssd", "current": f"{used_percent - 10}%", "d14": f"{used_percent - 2}%", "risk": "中等"},
+                            {"pool": "archive-hdd", "current": "54%", "d14": "57%", "risk": "低"},
+                        ],
+                        "chart_type": "line",
+                        "title": "存储容量 14 日趋势预测",
+                    },
+                    "warnings": [
+                        {"level": "warning", "message": f"生产存储池预计 14 天内达到 {used_percent}%，建议扩容"},
+                    ],
+                    "header_badges": [{"text": "需关注", "tone": "warning"}],
+                    "metadata": [
+                        {"label": "数据来源", "value": "Foundation 监控"},
+                        {"label": "采集时间", "value": "2026-05-14T10:00:00Z"},
+                    ],
+                    "callouts": [
+                        {"text": "建议在生产池达到 80% 前完成扩容", "tone": "warning", "title": "容量预警"},
+                    ],
+                    "extra_actions": [
+                        {"id": "download_capacity_report", "label": "下载容量报告"},
+                        {"id": "open_scale_plan", "label": "查看扩容方案"},
+                    ],
+                    "block_id_suffix": suffix,
+                },
             ),
         ),
     )
@@ -786,6 +941,48 @@ def _attachment_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="attachment_list",
+                data={
+                    "heading": "恢复报告",
+                    "subtitle": "恢复操作生成的可下载文件",
+                    "header_badges": [{"text": "2 个文件", "tone": "info"}],
+                    "attachments": [
+                        {
+                            "attachment_id": f"runbook-{suffix}",
+                            "filename": "recovery_runbook.md",
+                            "size": 18432,
+                            "download_url": f"https://foundation.example.com/artifacts/runbook-{suffix}",
+                            "title": "恢复执行手册",
+                            "summary": "异机恢复执行清单（18 KB）",
+                            "badges": [{"text": "Markdown", "tone": "info"}],
+                            "metadata": [
+                                {"label": "生成时间", "value": "2026-05-14T14:30:00Z"},
+                                {"label": "文件类型", "value": "text/markdown"},
+                            ],
+                            "card_tone": "info",
+                        },
+                        {
+                            "attachment_id": f"risk-{suffix}",
+                            "filename": "risk_validation_report.pdf",
+                            "size": 245760,
+                            "download_url": f"https://foundation.example.com/artifacts/risk-{suffix}",
+                            "title": "风险验证报告",
+                            "summary": "业务影响与验证建议（240 KB）",
+                            "badges": [{"text": "PDF", "tone": "info"}, {"text": "已验证", "tone": "success"}],
+                            "metadata": [
+                                {"label": "生成时间", "value": "2026-05-14T14:30:00Z"},
+                                {"label": "文件类型", "value": "application/pdf"},
+                            ],
+                        },
+                    ],
+                    "meta": {"source": "restore_operation"},
+                },
+            ),
+        ),
     )
 
 
@@ -852,6 +1049,33 @@ def _visible_error_scenario(
                     ),
                     _state(active_block_ids=[block_id]),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="progress_report",
+                data={
+                    "heading": "恢复操作失败",
+                    "stage": "failed",
+                    "steps": [
+                        {"step_id": "1", "label": "搜索恢复点", "status": "completed"},
+                        {"step_id": "2", "label": "验证约束", "status": "failed", "badges": [{"text": "失败", "tone": "danger"}]},
+                    ],
+                    "error": {"message": "未找到满足当前请求约束的有效恢复点", "tone": "danger", "title": "恢复点不可用"},
+                    "callouts": [
+                        {"text": "建议扩大时间窗口后重试", "tone": "info", "title": "建议操作"},
+                    ],
+                    "extra_actions": [
+                        {"id": "retry_restore_search", "kind": "submit_message", "label": "扩大窗口重试"},
+                        {"id": "open_restore_runbook", "kind": "open_ref", "label": "查看排查手册"},
+                    ],
+                    "metadata": [
+                        {"label": "错误代码", "value": "RESTORE_POINT_UNAVAILABLE"},
+                        {"label": "可重试", "value": "是"},
+                    ],
+                },
             ),
         ),
     )
@@ -921,6 +1145,14 @@ def _doc_candidate_compare_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="plan_candidates",
+                data=_plan_candidates_data(candidates, reasoning_trace_id),
+            ),
+        ),
     )
 
 
@@ -969,7 +1201,7 @@ def _doc_report_detail_scenario(
                                         _heading("Recovery feasibility report", level=2),
                                         _badge_row(
                                             [
-                                                {"tone": "positive", "text": "Executable"},
+                                                {"tone": "success", "text": "Executable"},
                                                 {"tone": "neutral", "text": "Auto-generated"},
                                             ]
                                         ),
@@ -1027,12 +1259,11 @@ def _doc_report_detail_scenario(
                                                     [
                                                         _chart(
                                                             "line",
-                                                            x_axis=["08:00", "08:30", "09:00", "09:30"],
-                                                            series=[
-                                                                {
-                                                                    "name": "Write volume",
-                                                                    "data": [12, 18, 22, 16],
-                                                                }
+                                                            data=[
+                                                                {"label": "08:00", "value": 12},
+                                                                {"label": "08:30", "value": 18},
+                                                                {"label": "09:00", "value": 22},
+                                                                {"label": "09:30", "value": 16},
                                                             ],
                                                         )
                                                     ],
@@ -1118,6 +1349,67 @@ def _doc_report_detail_scenario(
                     ),
                     _state(active_block_ids=[block_id]),
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="report_detail",
+                data={
+                    "heading": "恢复可行性报告",
+                    "subtitle": "综合恢复窗口、风险评估和执行指导",
+                    "summary": "基于当前恢复窗口和风险评估的恢复可行性分析",
+                    "header_badges": [
+                        {"text": "可执行", "tone": "success"},
+                        {"text": "自动生成", "tone": "neutral"},
+                    ],
+                    "metadata": [
+                        {"label": "推荐恢复点", "value": candidates[0]["target"]},
+                        {"label": "预计耗时", "value": candidates[0]["rto"]},
+                        {"label": "风险级别", "value": candidates[0]["risk_level"]},
+                    ],
+                    "navigation": [
+                        {"section_id": "exec_steps", "title": "执行步骤"},
+                        {"section_id": "risk_notes", "title": "风险说明"},
+                        {"section_id": "object_details", "title": "对象详情"},
+                    ],
+                    "use_tabs": True,
+                    "sections": [
+                        {
+                            "section_id": "exec_steps",
+                            "title": "执行步骤",
+                            "section_type": "steps",
+                            "content": "1. 准备异机环境\n2. 恢复目标实例\n3. 导出选定表\n4. 验证并导入",
+                            "badges": [{"text": "4 步", "tone": "info"}],
+                        },
+                        {
+                            "section_id": "risk_notes",
+                            "title": "风险说明",
+                            "section_type": "risk",
+                            "content": {"risk_level": candidates[0]["risk_level"], "note": "导入前需确认目标表写冻结并执行完整性检查"},
+                            "callouts": [{"text": "导入前确认目标表已写冻结", "tone": "warning", "title": "注意事项"}],
+                        },
+                        {
+                            "section_id": "object_details",
+                            "title": "对象详情",
+                            "section_type": "data",
+                            "layout_nodes": [
+                                {"type": "data-table", "props": {
+                                    "columns": [
+                                        {"key": "object_name", "label": "对象"},
+                                        {"key": "restore_scope", "label": "恢复范围"},
+                                        {"key": "risk_level", "label": "风险级别"},
+                                    ],
+                                    "rows": [
+                                        {"object_name": "order_details", "restore_scope": "目标表", "risk_level": "中等"},
+                                        {"object_name": "order_archive", "restore_scope": "仅验证", "risk_level": "低"},
+                                    ],
+                                }},
+                            ],
+                        },
+                    ],
+                },
             ),
         ),
     )
@@ -1218,6 +1510,39 @@ def _incremental_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="progress_report",
+                data={
+                    "heading": "增量更新演示",
+                    "stage": "processing",
+                    "steps": [
+                        {"step_id": "1", "label": "准备计划骨架", "status": "completed"},
+                        {"step_id": "2", "label": "验证执行约束", "status": "in_progress"},
+                    ],
+                    "progress_percent": 20,
+                    "metadata": [
+                        {"label": "更新策略", "value": "增量补丁"},
+                    ],
+                },
+            ),
+            BusinessDataStep(
+                sequence=2,
+                content="Progress updated to 80%",
+                schema_type="incremental_update",
+                data={
+                    "target_block_id": f"progress-incremental-{suffix}",
+                    "patch": [
+                        {"op": "replace", "path": "/steps/1/status", "value": "completed"},
+                        {"op": "replace", "path": "/progress_percent", "value": 80},
+                    ],
+                    "patch_type": "status_change",
+                    "version": 2,
+                },
+            ),
+        ),
     )
 
 
@@ -1255,6 +1580,18 @@ def _text_only_scenario(
                     },
                     {"type": "TEXT_MESSAGE_END", "messageId": message_id},
                 ),
+            ),
+        ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="text_message",
+                data={
+                    "text": summary,
+                    "format_hint": "markdown",
+                    "badges": [{"text": "纯文本", "tone": "neutral"}],
+                },
             ),
         ),
     )
@@ -1315,7 +1652,64 @@ def _general_scenario(
                 ),
             ),
         ),
+        business_data_steps=(
+            BusinessDataStep(
+                sequence=1,
+                content=summary,
+                schema_type="text_message",
+                data={"text": summary},
+            ),
+        ),
     )
+
+
+def _plan_candidates_data(
+    candidates: list[dict[str, Any]],
+    reasoning_trace_id: str,
+) -> dict[str, Any]:
+    items = []
+    for candidate in candidates:
+        item: dict[str, Any] = {
+            "candidate_option_id": str(candidate["candidate_option_id"]),
+            "title": str(candidate["title"]),
+            "summary": str(candidate["summary"]),
+            "recommendation_level": str(candidate.get("recommendation_level", "alternative")),
+            "risk_level": str(candidate.get("risk_level", "medium")),
+        }
+        badges = []
+        if candidate.get("recommendation_level") == "recommended":
+            badges.append({"text": "推荐", "tone": "success"})
+        else:
+            badges.append({"text": "备选", "tone": "neutral"})
+        risk_tone = "danger" if candidate["risk_level"] == "high" else "warning" if candidate["risk_level"] == "medium" else "success"
+        badges.append({"text": candidate["risk_level"], "tone": risk_tone})
+        item["badges"] = badges
+        metadata = []
+        if candidate.get("rpo"):
+            metadata.append({"label": "RPO", "value": str(candidate["rpo"])})
+        if candidate.get("rto"):
+            metadata.append({"label": "RTO", "value": str(candidate["rto"])})
+        if candidate.get("target"):
+            metadata.append({"label": "目标", "value": str(candidate["target"])})
+        if metadata:
+            item["metadata"] = metadata
+        if candidate.get("impact_summary"):
+            item["callouts"] = [{"text": str(candidate["impact_summary"]), "tone": "info"}]
+        if candidate.get("risk_level") == "high":
+            item["card_tone"] = "warning"
+        items.append(item)
+    return {
+        "heading": "恢复候选方案",
+        "subtitle": "比较动态生成的方案，涵盖速度、影响、执行难度和风险",
+        "candidates": items,
+        "header_badges": [{"text": f"{len(items)} 个方案", "tone": "info"}],
+        "header_metadata": [{"label": "推理追踪", "value": reasoning_trace_id}],
+        "selection": {
+            "required": True,
+            "selectedCandidateOptionId": None,
+            "selectionLocked": False,
+        },
+    }
 
 
 def _scenario_id(content: str) -> str:
@@ -1329,10 +1723,10 @@ def _scenario_id(content: str) -> str:
         ("show progress", "progress"),
         ("clarify", "clarifying"),
         ("replay restore", "restore"),
+        ("visible error", "visible_error"),
         ("restore", "restore"),
         ("capacity", "capacity"),
         ("attachment", "attachment"),
-        ("visible error", "visible_error"),
         ("incremental", "incremental"),
         ("text fallback", "text_only"),
     )
@@ -1381,6 +1775,7 @@ def _stamp_scenario_events(
         core_agent_run_id=plan.core_agent_run_id,
         result_summary=plan.result_summary,
         ag_ui_steps=tuple(stamped_steps),
+        business_data_steps=plan.business_data_steps,
     )
 
 
@@ -1662,13 +2057,14 @@ def _state(
     *,
     active_block_ids: list[str] | None = None,
     selection: dict[str, Any] | None = None,
+    status: str = "processing",
 ) -> dict[str, Any]:
-    state: dict[str, Any] = {}
+    snapshot: dict[str, Any] = {"interaction": {"status": status}}
     if active_block_ids is not None:
-        state["view"] = {"activeBlockIds": active_block_ids}
+        snapshot["view"] = {"activeBlockIds": active_block_ids}
     if selection is not None:
-        state["selection"] = selection
-    return {"type": "STATE_SNAPSHOT", "state": state}
+        snapshot["selection"] = selection
+    return {"type": "STATE_SNAPSHOT", "snapshot": snapshot}
 
 
 def _state_delta(delta: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1708,7 +2104,7 @@ def _candidate_compare_ui(
                     _badge_row(
                         [
                             {
-                                "tone": "positive"
+                                "tone": "success"
                                 if candidate["recommendation_level"] == "recommended"
                                 else "neutral",
                                 "text": candidate["recommendation_level"],
@@ -1716,7 +2112,7 @@ def _candidate_compare_ui(
                             {
                                 "tone": "warning"
                                 if candidate["risk_level"] in {"medium", "high"}
-                                else "positive",
+                                else "success",
                                 "text": candidate["risk_level"],
                             },
                         ]
@@ -1824,6 +2220,7 @@ def _chart(
     *,
     x_axis: list[str] | None = None,
     series: list[dict[str, Any]] | None = None,
+    title: str | None = None,
 ) -> dict[str, Any]:
     props: dict[str, Any] = {"chartType": chart_type}
     if data is not None:
@@ -1832,6 +2229,8 @@ def _chart(
         props["xAxis"] = x_axis
     if series is not None:
         props["series"] = series
+    if title is not None:
+        props["title"] = title
     props["items"] = _chart_items(data=data, x_axis=x_axis, series=series)
     return {"type": "chart", "props": props}
 
@@ -1844,7 +2243,25 @@ def _data_table(
 
 
 def _attachment_list(items: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"type": "attachment-list", "props": {"items": items}}
+    mapped = []
+    for item in items:
+        entry = {
+            "title": item.get("title", item.get("filename", "")),
+            "text": item.get("filename", item.get("title", "")),
+            "summary": item.get("summary", item.get("contentType", "")),
+        }
+        if "attachmentId" in item:
+            entry["attachmentId"] = item["attachmentId"]
+        elif "refId" in item:
+            entry["attachmentId"] = item["refId"]
+        if "filename" in item:
+            entry["filename"] = item["filename"]
+        if "size" in item:
+            entry["size"] = str(item["size"])
+        if "downloadUrl" in item:
+            entry["downloadUrl"] = item["downloadUrl"]
+        mapped.append(entry)
+    return {"type": "attachment-list", "props": {"items": mapped}}
 
 
 def _action_row(action_ids: list[str]) -> dict[str, Any]:

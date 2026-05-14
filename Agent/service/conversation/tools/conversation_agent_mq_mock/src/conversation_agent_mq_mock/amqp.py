@@ -65,16 +65,27 @@ class RabbitMqMockService:
             durable=True,
         )
         await channel.declare_queue(self._settings.core_status_queue, durable=True)
-        ag_ui_exchange = await channel.declare_exchange(
-            self._settings.ag_ui_exchange,
+        bizdata_exchange = await channel.declare_exchange(
+            self._settings.bizdata_exchange,
             ExchangeType.TOPIC,
             durable=True,
         )
-        ag_ui_queue = await channel.declare_queue(self._settings.ag_ui_queue, durable=True)
-        await ag_ui_queue.bind(
-            ag_ui_exchange,
-            routing_key=self._settings.ag_ui_routing_key,
+        bizdata_queue = await channel.declare_queue(self._settings.bizdata_queue, durable=True)
+        await bizdata_queue.bind(
+            bizdata_exchange,
+            routing_key=self._settings.bizdata_routing_key,
         )
+        if self._settings.mode in ("kweaver", "both"):
+            kweaver_exchange = await channel.declare_exchange(
+                self._settings.kweaver_exchange,
+                ExchangeType.TOPIC,
+                durable=True,
+            )
+            kweaver_queue = await channel.declare_queue(self._settings.kweaver_queue, durable=True)
+            await kweaver_queue.bind(
+                kweaver_exchange,
+                routing_key=self._settings.kweaver_routing_key,
+            )
         queue = await channel.declare_queue(self._settings.mock_input_queue, durable=True)
         await queue.bind(
             conversation_exchange,
@@ -84,6 +95,7 @@ class RabbitMqMockService:
         runner = AgentMqMockRunner(
             settings=self._settings,
             publisher=RabbitMqPublisher(channel),
+            mode=self._settings.mode,
         )
 
         await queue.consume(_consumer(runner), no_ack=False)
@@ -93,7 +105,8 @@ class RabbitMqMockService:
                 "queue": self._settings.mock_input_queue,
                 "exchange": self._settings.conversation_exchange,
                 "routing_key": self._settings.conversation_routing_key,
-                "ag_ui_queue": self._settings.ag_ui_queue,
+                "bizdata_queue": self._settings.bizdata_queue,
+                "mode": self._settings.mode,
             },
         )
         await asyncio.Future()
