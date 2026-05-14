@@ -1,0 +1,62 @@
+{
+  "schema_type": "progress_report",
+  "schema_version": "1",
+  "data": {
+    "heading": "恢复执行进度",
+    "stage": "executing",
+    "steps": [
+      {
+        "step_id": "step_connect",
+        "label": "连接目标实例",
+        "status": "completed"
+      },
+      {
+        "step_id": "step_validate",
+        "label": "验证恢复点可用性",
+        "status": "completed"
+      },
+      {
+        "step_id": "step_transfer",
+        "label": "传输恢复数据",
+        "status": "in_progress",
+        "metadata": [
+          {
+            "label": "已传输",
+            "value": "320GB / 500GB"
+          }
+        ]
+      },
+      {
+        "step_id": "step_verify",
+        "label": "校验数据一致性",
+        "status": "pending"
+      },
+      {
+        "step_id": "step_complete",
+        "label": "完成恢复确认",
+        "status": "pending"
+      }
+    ],
+    "progress_percent": 64,
+    "eta": "预计剩余 18 分钟",
+    "metrics": [
+      {
+        "label": "传输速率",
+        "value": "1.2 GB/s",
+        "unit": "GB/s"
+      },
+      {
+        "label": "已用时间",
+        "value": "7 分钟",
+        "unit": "min"
+      }
+    ],
+    "callouts": [
+      {
+        "text": "数据传输过程中请勿关闭页面",
+        "tone": "info"
+      }
+    ]
+  },
+  "content": "恢复执行进度：数据传输中，已完成 64%"
+}

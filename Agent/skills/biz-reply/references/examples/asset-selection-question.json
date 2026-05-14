@@ -1,0 +1,31 @@
+{
+  "schema_type": "clarification_request",
+  "schema_version": "1",
+  "data": {
+    "question": "请选择需要保护或恢复的系统",
+    "context": "已发现 3 个可识别的业务系统，请确认目标系统后继续操作",
+    "options": [
+      {
+        "option_id": "sys_order",
+        "label": "订单系统",
+        "description": "MySQL 8.0，生产环境，数据量约 500GB",
+        "is_recommended": true
+      },
+      {
+        "option_id": "sys_erp",
+        "label": "ERP 系统",
+        "description": "PostgreSQL 15，生产环境，数据量约 200GB"
+      },
+      {
+        "option_id": "sys_log",
+        "label": "日志平台",
+        "description": "Elasticsearch 8.x，测试环境，数据量约 1TB"
+      }
+    ],
+    "selection": {
+      "required": true,
+      "selection_locked": false
+    }
+  },
+  "content": "请选择需要保护或恢复的系统"
+}

@@ -1,0 +1,62 @@
+{
+  "schema_type": "plan_candidates",
+  "schema_version": "1",
+  "data": {
+    "heading": "请选择恢复时间点",
+    "candidates": [
+      {
+        "candidate_option_id": "candidate_latest",
+        "title": "方案 A：最新可用恢复点",
+        "summary": "恢复速度最快，数据丢失窗口较小",
+        "recommendation_level": "recommended",
+        "risk_level": "medium",
+        "metadata": [
+          {
+            "label": "恢复点时间",
+            "value": "2026-05-13 08:30"
+          },
+          {
+            "label": "RPO",
+            "value": "2 小时"
+          },
+          {
+            "label": "预计 RTO",
+            "value": "30 分钟"
+          }
+        ],
+        "callouts": [
+          {
+            "text": "该时间点已通过可用性验证",
+            "tone": "positive"
+          }
+        ]
+      },
+      {
+        "candidate_option_id": "candidate_stable",
+        "title": "方案 B：上一个稳定恢复点",
+        "summary": "风险更低，但恢复窗口更早",
+        "recommendation_level": "alternative",
+        "risk_level": "low",
+        "metadata": [
+          {
+            "label": "恢复点时间",
+            "value": "2026-05-12 20:00"
+          },
+          {
+            "label": "RPO",
+            "value": "14 小时"
+          },
+          {
+            "label": "预计 RTO",
+            "value": "45 分钟"
+          }
+        ]
+      }
+    ],
+    "selection": {
+      "required": true,
+      "selection_locked": false
+    }
+  },
+  "content": "请选择恢复时间点，已生成 2 个候选方案"
+}

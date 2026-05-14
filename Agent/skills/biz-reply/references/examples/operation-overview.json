@@ -1,0 +1,86 @@
+{
+  "schema_type": "capacity_forecast",
+  "schema_version": "1",
+  "data": {
+    "metrics": [
+      {
+        "label": "存储使用率",
+        "current": "78%",
+        "capacity": "100%",
+        "unit": "%"
+      },
+      {
+        "label": "备份成功率",
+        "current": "97.2%",
+        "capacity": "100%",
+        "unit": "%"
+      },
+      {
+        "label": "保护覆盖率",
+        "current": "95%",
+        "capacity": "100%",
+        "unit": "%"
+      }
+    ],
+    "forecast": {
+      "title": "存储容量趋势（未来 30 天）",
+      "chart_type": "line",
+      "items": [
+        {
+          "date": "2026-05-13",
+          "used_tb": 15.6,
+          "total_tb": 20
+        },
+        {
+          "date": "2026-05-20",
+          "used_tb": 16.2,
+          "total_tb": 20
+        },
+        {
+          "date": "2026-05-27",
+          "used_tb": 16.8,
+          "total_tb": 20
+        },
+        {
+          "date": "2026-06-03",
+          "used_tb": 17.4,
+          "total_tb": 20
+        },
+        {
+          "date": "2026-06-10",
+          "used_tb": 18.0,
+          "total_tb": 20
+        }
+      ]
+    },
+    "warnings": [
+      {
+        "level": "warning",
+        "message": "存储使用率预计 30 天内达到 90%，建议扩容或优化保留策略"
+      },
+      {
+        "level": "info",
+        "message": "3 个备份任务存在超时风险，建议调整备份窗口"
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "3 个活跃告警",
+        "tone": "warning"
+      }
+    ],
+    "extra_actions": [
+      {
+        "id": "action_view_alerts",
+        "kind": "submit_message",
+        "label": "查看告警详情"
+      },
+      {
+        "id": "action_view_trend",
+        "kind": "submit_message",
+        "label": "查看容量趋势"
+      }
+    ]
+  },
+  "content": "运营概览：存储使用率 78%，3 个活跃告警"
+}

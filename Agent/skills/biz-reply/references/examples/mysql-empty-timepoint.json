@@ -1,0 +1,37 @@
+{
+  "schema_type": "clarification_request",
+  "schema_version": "1",
+  "data": {
+    "question": "未找到可用恢复点，请选择后续操作",
+    "context": "已检查目标 MySQL 实例在最近 7 天内的备份记录，未发现可用恢复点。可能原因：备份任务未执行、备份已过期或存储异常。",
+    "options": [
+      {
+        "option_id": "opt_expand_range",
+        "label": "扩大时间范围",
+        "description": "将检查范围扩展到 30 天",
+        "is_recommended": true
+      },
+      {
+        "option_id": "opt_check_other",
+        "label": "检查其他实例",
+        "description": "检查同集群下的其他可用实例"
+      },
+      {
+        "option_id": "opt_retry",
+        "label": "重新检查",
+        "description": "重新执行可用性检查"
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "空结果",
+        "tone": "warning"
+      }
+    ],
+    "selection": {
+      "required": true,
+      "selection_locked": false
+    }
+  },
+  "content": "未找到可用恢复点，请选择后续操作"
+}

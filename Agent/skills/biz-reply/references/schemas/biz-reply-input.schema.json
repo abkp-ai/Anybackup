@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.local/biz-reply-input.schema.json",
+  "title": "Business Reply Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_type",
+    "data",
+    "conversation_id",
+    "turn_id",
+    "sequence"
+  ],
+  "properties": {
+    "schema_type": {
+      "enum": [
+        "plan_candidates",
+        "progress_report",
+        "clarification_request",
+        "capacity_forecast",
+        "attachment_list",
+        "report_detail",
+        "text_message",
+        "incremental_update"
+      ]
+    },
+    "data": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "conversation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "turn_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "message_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "content": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "markdown": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Legacy text_message input. When provided, schema_type defaults to text_message and data.text is set to this value."
+    }
+  }
+}

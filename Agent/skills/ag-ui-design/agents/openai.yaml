@@ -1,4 +1,0 @@
-interface:
-  display_name: "AG-UI 设计"
-  short_description: "输出 AG-UI Markdown 设计约束与组件布局"
-  default_prompt: "Use ag-ui-design before ag-ui-response to define user-visible AG-UI layout, components, semantic labels, content boundaries, and hidden fields."

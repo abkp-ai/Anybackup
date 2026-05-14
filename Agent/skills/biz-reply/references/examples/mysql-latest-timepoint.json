@@ -1,0 +1,55 @@
+{
+  "schema_type": "plan_candidates",
+  "schema_version": "1",
+  "data": {
+    "heading": "已找到最新可用恢复点",
+    "candidates": [
+      {
+        "candidate_option_id": "candidate_latest",
+        "title": "目标 MySQL 实例 — 最近一次备份时间点",
+        "summary": "已通过可用性验证，建议使用该时间点恢复",
+        "recommendation_level": "recommended",
+        "risk_level": "low",
+        "metadata": [
+          {
+            "label": "恢复点时间",
+            "value": "2026-05-13 08:30"
+          },
+          {
+            "label": "备份类型",
+            "value": "全量备份"
+          },
+          {
+            "label": "数据量",
+            "value": "约 500GB"
+          },
+          {
+            "label": "RPO",
+            "value": "2 小时"
+          }
+        ],
+        "callouts": [
+          {
+            "text": "该时间点已通过可用性验证，可安全恢复",
+            "tone": "positive"
+          }
+        ]
+      }
+    ],
+    "header_metadata": [
+      {
+        "label": "目标实例",
+        "value": "MySQL 生产实例"
+      },
+      {
+        "label": "查询范围",
+        "value": "最近一次可用备份时间点"
+      }
+    ],
+    "selection": {
+      "required": true,
+      "selection_locked": false
+    }
+  },
+  "content": "已找到最新可用恢复点：2026-05-13 08:30"
+}

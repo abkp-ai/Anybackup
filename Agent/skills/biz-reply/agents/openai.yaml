@@ -1,0 +1,4 @@
+interface:
+  display_name: "业务回复"
+  short_description: "设计与生成业务回复数据，校验并发布到 MQ"
+  default_prompt: "Use biz-reply before visible business actions to design interaction cards, generate business data, validate, and publish to MQ."

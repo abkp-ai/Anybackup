@@ -1,0 +1,108 @@
+{
+  "schema_type": "report_detail",
+  "schema_version": "1",
+  "data": {
+    "heading": "订单系统备份方案审查",
+    "subtitle": "MySQL 8.0 生产实例",
+    "summary": "AI 已生成备份方案，信心值 92%，建议审核通过",
+    "sections": [
+      {
+        "section_id": "sec_params",
+        "title": "方案参数",
+        "section_type": "data",
+        "content": {
+          "columns": [
+            {
+              "key": "param",
+              "label": "参数"
+            },
+            {
+              "key": "value",
+              "label": "值"
+            }
+          ],
+          "rows": [
+            {
+              "param": "备份类型",
+              "value": "全量 + 增量"
+            },
+            {
+              "param": "备份策略",
+              "value": "每日全量 + 4小时增量"
+            },
+            {
+              "param": "RPO",
+              "value": "4 小时"
+            },
+            {
+              "param": "RTO",
+              "value": "30 分钟"
+            },
+            {
+              "param": "加密",
+              "value": "AES-256"
+            },
+            {
+              "param": "保留策略",
+              "value": "全量 30 天 / 增量 7 天"
+            }
+          ]
+        }
+      },
+      {
+        "section_id": "sec_ai_reasoning",
+        "title": "AI 生成思路",
+        "section_type": "text",
+        "callouts": [
+          {
+            "text": "识别系统 → 匹配用户保护要求 → 推荐每日全量策略 → 检查与现有策略冲突 → 结论：建议审核通过",
+            "tone": "info",
+            "title": "决策依据"
+          }
+        ]
+      },
+      {
+        "section_id": "sec_confidence",
+        "title": "信心评估",
+        "section_type": "metrics",
+        "content": {
+          "metrics": [
+            {
+              "label": "信心值",
+              "value": "92%"
+            },
+            {
+              "label": "策略匹配度",
+              "value": "高"
+            },
+            {
+              "label": "冲突检查",
+              "value": "无冲突"
+            }
+          ]
+        }
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "待审核",
+        "tone": "warning"
+      },
+      {
+        "text": "信心 92%",
+        "tone": "positive"
+      }
+    ],
+    "metadata": [
+      {
+        "label": "保护对象",
+        "value": "订单系统 MySQL 实例"
+      },
+      {
+        "label": "数据量",
+        "value": "约 500GB"
+      }
+    ]
+  },
+  "content": "订单系统备份方案审查，信心值 92%，建议审核通过"
+}

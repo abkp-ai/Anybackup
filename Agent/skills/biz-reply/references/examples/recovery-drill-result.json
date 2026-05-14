@@ -1,0 +1,109 @@
+{
+  "schema_type": "report_detail",
+  "schema_version": "1",
+  "data": {
+    "heading": "恢复演练结果",
+    "subtitle": "订单系统 MySQL 实例",
+    "summary": "演练已完成，RPO/RTO 均达标，数据完整性校验通过",
+    "sections": [
+      {
+        "section_id": "sec_metrics",
+        "title": "关键指标",
+        "section_type": "metrics",
+        "content": {
+          "metrics": [
+            {
+              "label": "恢复数据量",
+              "value": "498 GB"
+            },
+            {
+              "label": "实际 RTO",
+              "value": "28 分钟"
+            },
+            {
+              "label": "RPO 目标",
+              "value": "4 小时"
+            },
+            {
+              "label": "RPO 达成",
+              "value": "2 小时内"
+            },
+            {
+              "label": "备份时间点",
+              "value": "2026-05-13 08:30"
+            }
+          ]
+        }
+      },
+      {
+        "section_id": "sec_integrity",
+        "title": "数据完整性校验",
+        "section_type": "data",
+        "content": {
+          "columns": [
+            {
+              "key": "check_item",
+              "label": "校验项"
+            },
+            {
+              "key": "source_db",
+              "label": "源库"
+            },
+            {
+              "key": "restored_db",
+              "label": "恢复后"
+            },
+            {
+              "key": "result",
+              "label": "结果"
+            }
+          ],
+          "rows": [
+            {
+              "check_item": "表数量",
+              "source_db": "128",
+              "restored_db": "128",
+              "result": "通过"
+            },
+            {
+              "check_item": "行数一致性",
+              "source_db": "已校验",
+              "restored_db": "已校验",
+              "result": "通过"
+            },
+            {
+              "check_item": "索引完整性",
+              "source_db": "已校验",
+              "restored_db": "已校验",
+              "result": "通过"
+            },
+            {
+              "check_item": "约束一致性",
+              "source_db": "已校验",
+              "restored_db": "已校验",
+              "result": "通过"
+            }
+          ]
+        }
+      },
+      {
+        "section_id": "sec_conclusion",
+        "title": "结论",
+        "section_type": "text",
+        "callouts": [
+          {
+            "text": "恢复演练成功，所有校验项均通过，RPO/RTO 达标",
+            "tone": "positive"
+          }
+        ]
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "演练成功",
+        "tone": "positive"
+      }
+    ]
+  },
+  "content": "恢复演练结果：RPO/RTO 达标，数据完整性校验通过"
+}

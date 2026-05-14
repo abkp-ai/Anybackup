@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.local/biz-reply-message.schema.json",
+  "title": "Business Reply Message",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_id",
+    "event_type",
+    "occurred_at",
+    "source_service",
+    "payload"
+  ],
+  "properties": {
+    "event_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "event_type": {
+      "const": "decision_agent.session.business_data"
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_service": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "conversation_id",
+        "turn_id",
+        "message_id",
+        "sequence",
+        "content",
+        "business_data"
+      ],
+      "properties": {
+        "conversation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "turn_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "content": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "business_data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_type", "schema_version", "data"],
+          "properties": {
+            "schema_type": {
+              "enum": [
+                "plan_candidates",
+                "progress_report",
+                "clarification_request",
+                "capacity_forecast",
+                "attachment_list",
+                "report_detail",
+                "text_message",
+                "incremental_update"
+              ]
+            },
+            "schema_version": {
+              "const": "1"
+            },
+            "data": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+}

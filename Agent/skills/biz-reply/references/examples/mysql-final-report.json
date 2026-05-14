@@ -1,0 +1,99 @@
+{
+  "schema_type": "report_detail",
+  "schema_version": "1",
+  "data": {
+    "heading": "恢复点确认完成",
+    "subtitle": "目标 MySQL 实例",
+    "summary": "数据已成功恢复至 2026-05-13 08:30 时间点，验证通过",
+    "sections": [
+      {
+        "section_id": "sec_metrics",
+        "title": "关键指标",
+        "section_type": "metrics",
+        "content": {
+          "metrics": [
+            {
+              "label": "恢复数据量",
+              "value": "498 GB"
+            },
+            {
+              "label": "实际 RTO",
+              "value": "28 分钟"
+            },
+            {
+              "label": "RPO 达成",
+              "value": "2 小时内"
+            },
+            {
+              "label": "校验结果",
+              "value": "全部通过"
+            }
+          ]
+        }
+      },
+      {
+        "section_id": "sec_verification",
+        "title": "数据一致性校验",
+        "section_type": "data",
+        "content": {
+          "columns": [
+            {
+              "key": "check_item",
+              "label": "校验项"
+            },
+            {
+              "key": "source",
+              "label": "源库"
+            },
+            {
+              "key": "restored",
+              "label": "恢复后"
+            },
+            {
+              "key": "result",
+              "label": "结果"
+            }
+          ],
+          "rows": [
+            {
+              "check_item": "表数量",
+              "source": "128",
+              "restored": "128",
+              "result": "一致"
+            },
+            {
+              "check_item": "索引完整性",
+              "source": "已校验",
+              "restored": "已校验",
+              "result": "一致"
+            },
+            {
+              "check_item": "可访问性",
+              "source": "-",
+              "restored": "已验证",
+              "result": "通过"
+            }
+          ]
+        }
+      },
+      {
+        "section_id": "sec_risk",
+        "title": "风险提示",
+        "section_type": "risk",
+        "callouts": [
+          {
+            "text": "恢复后建议在业务侧进行抽样确认，验证数据完整性",
+            "tone": "info"
+          }
+        ]
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "已完成",
+        "tone": "positive"
+      }
+    ]
+  },
+  "content": "恢复点确认完成，数据已成功恢复并验证通过"
+}

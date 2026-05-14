@@ -1,0 +1,107 @@
+{
+  "schema_type": "plan_candidates",
+  "schema_version": "1",
+  "data": {
+    "heading": "请选择修复方案",
+    "candidates": [
+      {
+        "candidate_option_id": "candidate_auto_fix",
+        "title": "方案 A：自动修复告警配置",
+        "summary": "自动调整备份窗口和保留策略，预计释放 2TB 存储空间",
+        "recommendation_level": "recommended",
+        "risk_level": "low",
+        "metadata": [
+          {
+            "label": "预计效果",
+            "value": "释放 2TB 存储"
+          },
+          {
+            "label": "耗时",
+            "value": "约 5 分钟"
+          },
+          {
+            "label": "风险等级",
+            "value": "低"
+          },
+          {
+            "label": "信心值",
+            "value": "95%"
+          }
+        ],
+        "callouts": [
+          {
+            "text": "推荐理由：风险低、效果明确、执行快速",
+            "tone": "info"
+          }
+        ]
+      },
+      {
+        "candidate_option_id": "candidate_manual",
+        "title": "方案 B：手动调整参数",
+        "summary": "手动调整备份策略参数，灵活度更高但需要更多配置",
+        "recommendation_level": "alternative",
+        "risk_level": "medium",
+        "metadata": [
+          {
+            "label": "预计效果",
+            "value": "按配置释放存储"
+          },
+          {
+            "label": "耗时",
+            "value": "约 20 分钟"
+          },
+          {
+            "label": "风险等级",
+            "value": "中"
+          },
+          {
+            "label": "信心值",
+            "value": "78%"
+          }
+        ],
+        "callouts": [
+          {
+            "text": "需要确认调整范围后执行，请仔细审查参数变更",
+            "tone": "warning"
+          }
+        ]
+      },
+      {
+        "candidate_option_id": "candidate_expand",
+        "title": "方案 C：扩容存储",
+        "summary": "直接扩容存储空间，无需调整现有配置",
+        "recommendation_level": "alternative",
+        "risk_level": "low",
+        "metadata": [
+          {
+            "label": "预计效果",
+            "value": "增加 10TB 存储"
+          },
+          {
+            "label": "耗时",
+            "value": "约 2 小时"
+          },
+          {
+            "label": "风险等级",
+            "value": "低"
+          },
+          {
+            "label": "信心值",
+            "value": "90%"
+          }
+        ]
+      }
+    ],
+    "header_badges": [
+      {
+        "text": "3 个可选方案",
+        "tone": "info"
+      }
+    ],
+    "selection": {
+      "required": true,
+      "selection_locked": false
+    }
+  },
+  "content": "请选择修复方案，已生成 3 个候选方案"
+}
