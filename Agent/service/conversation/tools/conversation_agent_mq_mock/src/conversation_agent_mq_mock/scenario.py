@@ -149,6 +149,7 @@ def _thought_scenario(
                 schema_type="text_message",
                 data={
                     "text": summary,
+                    "format_hint": "markdown",
                     "badges": [{"text": "推理", "tone": "info"}],
                 },
             ),
@@ -255,6 +256,7 @@ def _tool_call_scenario(
                 schema_type="text_message",
                 data={
                     "text": summary,
+                    "format_hint": "markdown",
                     "badges": [{"text": "工具调用", "tone": "info"}],
                 },
             ),
@@ -686,13 +688,13 @@ def _restore_scenario(
                 sequence=1,
                 content="Understanding restore target and checking available restore points.",
                 schema_type="text_message",
-                data={"text": "正在分析恢复目标并检查可用恢复点...", "badges": [{"text": "推理", "tone": "info"}]},
+                data={"text": "正在分析恢复目标并检查可用恢复点...", "format_hint": "markdown", "badges": [{"text": "推理", "tone": "info"}]},
             ),
             BusinessDataStep(
                 sequence=2,
                 content=f"Found restore point {restore_point} and two alternatives.",
                 schema_type="text_message",
-                data={"text": f"已找到恢复点 {restore_point} 及两个备选方案。", "badges": [{"text": "工具调用", "tone": "info"}]},
+                data={"text": f"已找到恢复点 {restore_point} 及两个备选方案。", "format_hint": "markdown", "badges": [{"text": "工具调用", "tone": "info"}]},
             ),
             BusinessDataStep(
                 sequence=3,

@@ -19,20 +19,35 @@ import {
   searchConversations,
   sendMessage,
 } from "@/services/conversation-service"
+import { startConversationRun } from "@/services/conversation-run-service"
+import {
+  mapAgUiEventsToEventName,
+  mapAgUiEventsToRichPayload,
+  mapAgUiEventsToStateSnapshot,
+  mapAgUiEventsToTextContent,
+  type ConversationAgUiEventApi,
+} from "@/services/conversation-response-adapter"
 import { ServiceError } from "@/types/auth"
 import type {
   CandidateSelectionInput,
   ClarificationResponseInput,
   ConversationDetail,
   ConversationMessageSummary,
-  ConversationStatusEvent,
+  ConversationRichPayload,
+  ConversationRunInput,
   ConversationSummary,
   ConversationWorkspaceSelection,
   ConversationWorkspaceState,
+  CreateConversationMessageInput,
   LocalDraftWorkspace,
   MessageAcceptedResult,
   UserMessageInput,
 } from "@/types/conversation"
+import {
+  derivePendingTurnState,
+  mergeConversationStatusEvent,
+  type PendingTurnState,
+} from "@/store/conversation-runtime"
 
 interface ConversationState {
   bootstrapped: boolean
@@ -71,22 +86,30 @@ interface ConversationActions {
 
 type ConversationStore = ConversationState & ConversationActions
 
-const persistedWorkspaceState = readConversationWorkspaceState()
-const conversationPollHandles = new Map<string, ReturnType<typeof setTimeout>>()
-const DEFAULT_CONVERSATION_POLL_DELAY_MS = 5000
-const MIN_CONVERSATION_REPOLL_DELAY_MS = 5000
-const MAX_CONVERSATION_REPOLL_DELAY_MS = 5000
-const PENDING_TURN_TIMEOUT_MS = 15 * 60 * 1000
-const ENABLE_MESSAGE_INTERACTION_STATE_RECONCILIATION = true
-
-interface PendingTurnState {
-  state: "idle" | "thinking" | "clarifying" | "submitting_selection" | "error"
-  turnId?: string
-  sourceMessageId?: string
+interface RunMessageBuffer {
+  messageId: string
+  role: "assistant" | "user"
+  events: ConversationAgUiEventApi[]
+  createdAt: string
+  updatedAt: string
+  status: ConversationMessageSummary["status"]
 }
+
+interface ConversationRunBuffer {
+  runId: string
+  activeActivityMessageId?: string
+  messagesById: Record<string, RunMessageBuffer>
+}
+
+const persistedWorkspaceState = readConversationWorkspaceState()
+const conversationRunAbortControllers = new Map<string, AbortController>()
+const conversationRunBuffers = new Map<string, ConversationRunBuffer>()
+const conversationRunReconnectAttempts = new Map<string, number>()
+const MAX_RUN_RECOVERY_ATTEMPTS = 2
 
 function toMessage(error: unknown): string {
   if (error instanceof ServiceError) return error.message
+  if (error instanceof Error && error.message.trim()) return error.message
   return translate("conversation.serviceUnavailable")
 }
 
@@ -99,6 +122,10 @@ function createLocalDraftWorkspace(seedDraft = ""): LocalDraftWorkspace {
     createdAt: now,
     updatedAt: now,
   }
+}
+
+function persistWorkspaceState(state: ConversationWorkspaceState): void {
+  writeConversationWorkspaceState(state)
 }
 
 function loadDraftForSelection(
@@ -123,122 +150,10 @@ function loadDraftForSelection(
   }
 }
 
-function persistWorkspaceState(state: ConversationWorkspaceState): void {
-  writeConversationWorkspaceState(state)
-}
-
-async function loadConversationPayload(conversationId: string): Promise<{
-  detail: ConversationDetail
-  messages: ConversationMessageSummary[]
-}> {
-  const [detail, messages] = await Promise.all([
-    getConversationDetail(conversationId),
-    getConversationMessages(conversationId),
-  ])
-
-  return { detail, messages }
-}
-
-function resolveInteractionStateFromMessages(
-  messages: ConversationMessageSummary[],
-  activeTurnId?: string,
-): {
-  interactionState: ConversationDetail["interactionState"]
-  turnId?: string
-  sourceMessageId?: string
-} | null {
-  const candidateMessages = [...messages]
-    .filter((message): message is ConversationMessageSummary & {
-      richPayload: Extract<ConversationMessageSummary["richPayload"], { kind: "layout_tree" }>
-    } => {
-      if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false
-      return message.richPayload?.kind === "layout_tree"
-    })
-    .reverse()
-
-  for (const message of candidateMessages) {
-    const interactionState = message.richPayload?.data.stateSnapshot?.interaction?.status
-    if (!interactionState) continue
-
-    return {
-      interactionState,
-      turnId: message.turnId,
-      sourceMessageId: message.messageId,
-    }
-  }
-
-  return null
-}
-
-function reconcileDetailWithMessages(
-  detail: ConversationDetail,
-  messages: ConversationMessageSummary[],
-): ConversationDetail {
-  if (!ENABLE_MESSAGE_INTERACTION_STATE_RECONCILIATION) return detail
-
-  const messageState = resolveInteractionStateFromMessages(messages, detail.activeTurnId)
-  if (!messageState?.interactionState) return detail
-
-  const interactionState = messageState.interactionState
-
-  return {
-    ...detail,
-    interactionState,
-    activeTurnId: shouldClearActiveTurnId(interactionState) ? undefined : detail.activeTurnId ?? messageState.turnId,
-  }
-}
-
-function replaceConversation(
-  conversations: ConversationSummary[],
-  conversation: ConversationSummary,
-): ConversationSummary[] {
-  return [conversation, ...conversations.filter((item) => item.conversationId !== conversation.conversationId)]
-}
-
-function isActiveInteractionState(state?: ConversationDetail["interactionState"]): boolean {
-  return state === "thinking" || state === "executing" || state === "clarifying"
-}
-
-function pendingTurnFromInteractionState(input: {
-  interactionState?: ConversationDetail["interactionState"]
-  activeTurnId?: string | null
-  turnId?: string
-  sourceMessageId?: string
-}): PendingTurnState {
-  const turnId = input.activeTurnId ?? input.turnId
-
-  if (isActiveInteractionState(input.interactionState) && input.interactionState !== "clarifying") {
-    return {
-      state: "thinking",
-      ...(turnId ? { turnId } : {}),
-    }
-  }
-
-  if (input.interactionState === "clarifying") {
-    return {
-      state: "clarifying",
-      ...(turnId ? { turnId } : {}),
-      ...(input.sourceMessageId ? { sourceMessageId: input.sourceMessageId } : {}),
-    }
-  }
-
-  if (input.interactionState === "error") {
-    return {
-      state: "error",
-      ...(turnId ? { turnId } : {}),
-    }
-  }
-
-  return { state: "idle" }
-}
-
-function shouldContinuePolling(pendingTurn: PendingTurnState, hasMore = false): boolean {
-  return hasMore || pendingTurn.state === "thinking"
-}
-
-function pendingTurnIdentity(pendingTurn?: PendingTurnState): string {
-  if (!pendingTurn) return ""
-  return `${pendingTurn.turnId ?? ""}:${pendingTurn.sourceMessageId ?? ""}`
+function workspaceRequestKey(selection: ConversationWorkspaceSelection): string {
+  return selection.kind === "conversation"
+    ? `conversation:${selection.conversationId}`
+    : `local:${selection.localDraftId}`
 }
 
 function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
@@ -248,33 +163,38 @@ function omitRecordKey<T>(record: Record<string, T>, key: string): Record<string
   return rest
 }
 
-function pendingTurnStartedAtMsByConversation(
-  current: ConversationState,
-  conversationId: string,
-  pendingTurn: PendingTurnState,
-  restoredStartedAtMs?: number,
-): Record<string, number> {
-  const startedAtByConversation = current.pendingTurnStartedAtMsByConversationId ?? {}
+function replaceConversation(
+  conversations: ConversationSummary[],
+  conversation: ConversationSummary,
+): ConversationSummary[] {
+  return [conversation, ...conversations.filter((item) => item.conversationId !== conversation.conversationId)]
+}
 
-  if (pendingTurn.state !== "thinking") {
-    return omitRecordKey(startedAtByConversation, conversationId)
+function upsertMessage(
+  messages: ConversationMessageSummary[],
+  incoming: ConversationMessageSummary,
+): ConversationMessageSummary[] {
+  const existingIndex = messages.findIndex((message) => message.messageId === incoming.messageId)
+  if (existingIndex < 0) {
+    return [...messages, incoming]
   }
 
-  const previousPendingTurn = current.pendingTurnByConversationId[conversationId]
-  const previousStartedAtMs = startedAtByConversation[conversationId]
+  return messages.map((message, index) =>
+    index === existingIndex
+      ? {
+          ...message,
+          ...incoming,
+        }
+      : message,
+  )
+}
 
-  if (
-    previousPendingTurn?.state === "thinking" &&
-    pendingTurnIdentity(previousPendingTurn) === pendingTurnIdentity(pendingTurn) &&
-    typeof previousStartedAtMs === "number"
-  ) {
-    return startedAtByConversation
+function normalizeMessageTimestamp(value?: number): string {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return new Date(value).toISOString()
   }
 
-  return {
-    ...startedAtByConversation,
-    [conversationId]: restoredStartedAtMs ?? Date.now(),
-  }
+  return new Date().toISOString()
 }
 
 function toTimestampMs(value?: string): number | undefined {
@@ -301,158 +221,634 @@ function resolvePendingTurnStartedAtMsFromMessages(
   return Math.min(...timestamps)
 }
 
-function resolveInteractionStateFromMessage(
-  message?: ConversationMessageSummary,
+function shouldClearActiveTurnId(interactionState?: ConversationDetail["interactionState"]): boolean {
+  return interactionState === "idle" || interactionState === "completed" || interactionState === "error"
+}
+
+function resolveInteractionStateFromMessages(
+  messages: ConversationMessageSummary[],
+  activeTurnId?: string,
 ): ConversationDetail["interactionState"] | undefined {
-  if (message?.richPayload?.kind === "layout_tree") {
-    return message.richPayload.data.stateSnapshot?.interaction?.status
+  const candidates = [...messages]
+    .filter((message) => {
+      if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false
+      return message.richPayload?.kind === "layout_tree"
+    })
+    .reverse()
+
+  for (const message of candidates) {
+    const interactionState =
+      message.richPayload?.kind === "layout_tree" ? message.richPayload.data.stateSnapshot?.interaction?.status : undefined
+
+    if (interactionState) return interactionState
   }
 
   return undefined
 }
 
-function shouldClearActiveTurnId(interactionState?: ConversationDetail["interactionState"]): boolean {
-  return interactionState === "idle" || interactionState === "completed" || interactionState === "error"
+function reconcileDetailWithMessages(detail: ConversationDetail, messages: ConversationMessageSummary[]): ConversationDetail {
+  const interactionState = resolveInteractionStateFromMessages(messages, detail.activeTurnId) ?? detail.interactionState
+
+  return {
+    ...detail,
+    interactionState,
+    activeTurnId: shouldClearActiveTurnId(interactionState) ? undefined : detail.activeTurnId,
+  }
 }
 
-function normalizeConversationRepollDelay(delayMs: number): number {
-  return Number.isFinite(delayMs) && delayMs > 0
-    ? Math.min(Math.max(delayMs, MIN_CONVERSATION_REPOLL_DELAY_MS), MAX_CONVERSATION_REPOLL_DELAY_MS)
-    : DEFAULT_CONVERSATION_POLL_DELAY_MS
-}
+function pendingTurnStartedAtMsByConversation(
+  current: ConversationState,
+  conversationId: string,
+  pendingTurn: PendingTurnState,
+  restoredStartedAtMs?: number,
+): Record<string, number> {
+  const startedAtByConversation = current.pendingTurnStartedAtMsByConversationId ?? {}
 
-function normalizeAcceptedPollDelay(delayMs: number): number {
-  if (!Number.isFinite(delayMs) || delayMs <= 0) return 0
-  return normalizeConversationRepollDelay(delayMs)
-}
-
-function upsertMessage(
-  messages: ConversationMessageSummary[],
-  incoming: ConversationMessageSummary,
-): ConversationMessageSummary[] {
-  const existingIndex = messages.findIndex((message) => message.messageId === incoming.messageId)
-  if (existingIndex < 0) {
-    return [...messages, incoming]
+  if (pendingTurn.state !== "thinking") {
+    return omitRecordKey(startedAtByConversation, conversationId)
   }
 
-  return messages.map((message, index) =>
-    index === existingIndex
-      ? {
-          ...message,
-          ...incoming,
-        }
-      : message,
+  const previousPendingTurn = current.pendingTurnByConversationId[conversationId]
+  const previousStartedAtMs = startedAtByConversation[conversationId]
+
+  if (
+    previousPendingTurn?.state === "thinking" &&
+    previousPendingTurn.turnId === pendingTurn.turnId &&
+    previousPendingTurn.sourceMessageId === pendingTurn.sourceMessageId &&
+    typeof previousStartedAtMs === "number"
+  ) {
+    return startedAtByConversation
+  }
+
+  return {
+    ...startedAtByConversation,
+    [conversationId]: restoredStartedAtMs ?? Date.now(),
+  }
+}
+
+function shouldStreamPendingTurn(pendingTurn: PendingTurnState | undefined): boolean {
+  return pendingTurn?.state === "thinking"
+}
+
+function resolveAcceptedActiveTurnId(accepted: MessageAcceptedResult): string | undefined {
+  if (accepted.statusEvent.activeTurnId === null) return undefined
+
+  return (
+    accepted.statusEvent.activeTurnId ??
+    accepted.conversation.activeTurnId ??
+    accepted.statusEvent.turnId ??
+    accepted.message.turnId
   )
 }
 
-function workspaceRequestKey(selection: ConversationWorkspaceSelection): string {
-  return selection.kind === "conversation"
-    ? `conversation:${selection.conversationId}`
-    : `local:${selection.localDraftId}`
+function resolveAcceptedInteractionState(
+  accepted: MessageAcceptedResult,
+  activeTurnId?: string,
+): ConversationDetail["interactionState"] | undefined {
+  return accepted.statusEvent.interactionState ?? accepted.conversation.interactionState ?? (activeTurnId ? "thinking" : undefined)
+}
+
+function buildRunRequestState(messages: ConversationMessageSummary[], activeTurnId?: string): Record<string, unknown> | undefined {
+  const candidate = [...messages]
+    .filter((message) => {
+      if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false
+      return message.richPayload?.kind === "layout_tree"
+    })
+    .reverse()
+    .find((message) => message.richPayload?.kind === "layout_tree" && message.richPayload.data.stateSnapshot)
+
+  if (!candidate?.richPayload || candidate.richPayload.kind !== "layout_tree" || !candidate.richPayload.data.stateSnapshot) {
+    return undefined
+  }
+
+  return JSON.parse(JSON.stringify(candidate.richPayload.data.stateSnapshot)) as Record<string, unknown>
+}
+
+function buildRunRequestMessages(messages: ConversationMessageSummary[]): ConversationRunInput["messages"] {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message): ConversationRunInput["messages"][number] => ({
+      role: message.role === "assistant" ? "assistant" : "user",
+      content: message.content.trim(),
+    }))
+    .filter((message) => message.content.length > 0)
+}
+
+function runIdFromEvent(event: ConversationAgUiEventApi): string | undefined {
+  if (event.type === "RUN_STARTED" || event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+    return event.runId
+  }
+
+  return undefined
+}
+
+function ensureRunBuffer(conversationId: string, runId: string): ConversationRunBuffer {
+  const current = conversationRunBuffers.get(conversationId)
+  if (current?.runId === runId) return current
+
+  const next: ConversationRunBuffer = {
+    runId,
+    messagesById: {},
+  }
+  conversationRunBuffers.set(conversationId, next)
+  return next
+}
+
+function ensureRunMessageBuffer(
+  runBuffer: ConversationRunBuffer,
+  messageId: string,
+  createdAt: string,
+  role: "assistant" | "user" = "assistant",
+): RunMessageBuffer {
+  const existing = runBuffer.messagesById[messageId]
+  if (existing) return existing
+
+  const next: RunMessageBuffer = {
+    messageId,
+    role,
+    events: [],
+    createdAt,
+    updatedAt: createdAt,
+    status: "streaming",
+  }
+  runBuffer.messagesById[messageId] = next
+  return next
+}
+
+function contentSummaryFromRichPayload(richPayload?: ConversationRichPayload): string {
+  if (!richPayload) return ""
+
+  switch (richPayload.kind) {
+    case "markdown":
+      return richPayload.data.markdown
+    case "layout_tree":
+      return translate("conversation.placeholder.richContent")
+    case "candidate_options":
+      return richPayload.data.summary ?? richPayload.data.title
+    case "clarification":
+      return richPayload.data.prompt
+    case "thought":
+      return richPayload.data.summary
+    case "result":
+      return richPayload.data.summary
+    case "ag_ui":
+      return richPayload.data.summary
+    default:
+      return ""
+  }
+}
+
+function shouldIgnoreSyntheticTextContent(content: string): boolean {
+  const placeholders = [
+    translate("conversation.placeholder.richContent"),
+    translate("conversation.placeholder.clarification"),
+    translate("conversation.placeholder.status"),
+  ]
+
+  return placeholders.includes(content)
+}
+
+function toRuntimeMessageContent(events: ConversationAgUiEventApi[], richPayload?: ConversationRichPayload): string {
+  const textContent = mapAgUiEventsToTextContent(events).trim()
+  if (textContent && !shouldIgnoreSyntheticTextContent(textContent)) {
+    return textContent
+  }
+
+  return contentSummaryFromRichPayload(richPayload)
+}
+
+function toRuntimeMessageContentType(
+  richPayload: ConversationRichPayload | undefined,
+): ConversationMessageSummary["contentType"] {
+  if (richPayload?.kind === "clarification") return "clarification"
+  if (richPayload) return "rich_content"
+  return "text"
+}
+
+function buildRuntimeMessageSummary(
+  conversationId: string,
+  turnId: string,
+  messageBuffer: RunMessageBuffer,
+): ConversationMessageSummary {
+  const richPayload = mapAgUiEventsToRichPayload(messageBuffer.events)
+
+  return {
+    messageId: messageBuffer.messageId,
+    conversationId,
+    turnId,
+    role: messageBuffer.role,
+    contentType: toRuntimeMessageContentType(richPayload),
+    content: toRuntimeMessageContent(messageBuffer.events, richPayload),
+    richPayload,
+    createdAt: messageBuffer.createdAt,
+    updatedAt: messageBuffer.updatedAt,
+    status: messageBuffer.status,
+    agUiEventName: mapAgUiEventsToEventName(messageBuffer.events),
+  }
+}
+
+function appendRunEvent(
+  conversationId: string,
+  runId: string,
+  event: ConversationAgUiEventApi,
+): ConversationMessageSummary[] {
+  const runBuffer = ensureRunBuffer(conversationId, runId)
+  const timestamp = normalizeMessageTimestamp(event.timestamp)
+
+  const appendEventToBuffer = (messageId: string, role: "assistant" | "user" = "assistant"): void => {
+    const messageBuffer = ensureRunMessageBuffer(runBuffer, messageId, timestamp, role)
+    messageBuffer.events.push(event)
+    messageBuffer.updatedAt = timestamp
+  }
+
+  switch (event.type) {
+    case "TEXT_MESSAGE_START":
+    case "TEXT_MESSAGE_CONTENT":
+    case "TEXT_MESSAGE_END": {
+      const messageId = typeof event.messageId === "string" && event.messageId.trim() ? event.messageId : `msg_text_${runId}`
+      const role = event.type === "TEXT_MESSAGE_START" && event.role === "user" ? "user" : "assistant"
+      appendEventToBuffer(messageId, role)
+      break
+    }
+    case "ACTIVITY_SNAPSHOT":
+    case "ACTIVITY_DELTA": {
+      const messageId =
+        typeof event.messageId === "string" && event.messageId.trim() ? event.messageId : `msg_activity_${runId}`
+      runBuffer.activeActivityMessageId = messageId
+      appendEventToBuffer(messageId)
+      break
+    }
+    case "STATE_SNAPSHOT":
+    case "STATE_DELTA":
+    case "CUSTOM": {
+      const messageId = runBuffer.activeActivityMessageId
+      if (messageId) {
+        appendEventToBuffer(messageId)
+      }
+      break
+    }
+    default:
+      break
+  }
+
+  return Object.values(runBuffer.messagesById)
+    .map((messageBuffer) => buildRuntimeMessageSummary(conversationId, runId, messageBuffer))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+function markRunMessagesStatus(
+  conversationId: string,
+  status: ConversationMessageSummary["status"],
+): ConversationMessageSummary[] {
+  const runBuffer = conversationRunBuffers.get(conversationId)
+  if (!runBuffer) return []
+
+  for (const messageBuffer of Object.values(runBuffer.messagesById)) {
+    messageBuffer.status = status
+    messageBuffer.updatedAt = new Date().toISOString()
+  }
+
+  return Object.values(runBuffer.messagesById)
+    .map((messageBuffer) => buildRuntimeMessageSummary(conversationId, runBuffer.runId, messageBuffer))
+    .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+function stopConversationRun(conversationId?: string | null, clearBuffers = true): void {
+  if (!conversationId) return
+
+  const controller = conversationRunAbortControllers.get(conversationId)
+  if (controller) {
+    controller.abort()
+    conversationRunAbortControllers.delete(conversationId)
+  }
+
+  if (clearBuffers) {
+    conversationRunBuffers.delete(conversationId)
+  }
+}
+
+async function loadConversationPayload(conversationId: string): Promise<{
+  detail: ConversationDetail
+  messages: ConversationMessageSummary[]
+}> {
+  const [detail, messages] = await Promise.all([getConversationDetail(conversationId), getConversationMessages(conversationId)])
+
+  return {
+    detail: reconcileDetailWithMessages(detail, messages),
+    messages,
+  }
 }
 
 export const useConversationStore = create<ConversationStore>((set, get) => {
-  const applyConversationStatusEvent = (conversationId: string, event: ConversationStatusEvent): void => {
-    set((current) => {
-      const applied = current.appliedStatusEventIdsByConversationId[conversationId] ?? {}
-      if (applied[event.statusEventId]) return current
+  async function recoverConversationAfterDisconnect(conversationId: string): Promise<void> {
+    if (!conversationRunReconnectAttempts.has(conversationId)) {
+      conversationRunReconnectAttempts.set(conversationId, 0)
+    }
 
-      const latestSequence = current.latestEventSequenceByConversationId[conversationId] ?? 0
-      if (event.sequence <= latestSequence) {
-        return {
-          ...current,
-          appliedStatusEventIdsByConversationId: {
-            ...current.appliedStatusEventIdsByConversationId,
-            [conversationId]: {
-              ...applied,
-              [event.statusEventId]: true,
-            },
+    const currentAttempt = (conversationRunReconnectAttempts.get(conversationId) ?? 0) + 1
+    conversationRunReconnectAttempts.set(conversationId, currentAttempt)
+
+    if (currentAttempt > MAX_RUN_RECOVERY_ATTEMPTS) {
+      set((current) => ({
+        error: translate("conversation.serviceUnavailable"),
+        pendingTurnByConversationId: {
+          ...current.pendingTurnByConversationId,
+          [conversationId]: {
+            state: "error",
+            ...(current.pendingTurnByConversationId[conversationId]?.turnId
+              ? { turnId: current.pendingTurnByConversationId[conversationId].turnId }
+              : {}),
           },
-        }
+        },
+        pendingTurnStartedAtMsByConversationId: omitRecordKey(
+          current.pendingTurnStartedAtMsByConversationId ?? {},
+          conversationId,
+        ),
+      }))
+      return
+    }
+
+    try {
+      const { detail, messages } = await loadConversationPayload(conversationId)
+
+      let recoveredMessages = messages
+      let recoveredDetail = detail
+      let nextCursor: string | null = get().eventCursorByConversationId[conversationId] ?? null
+      let latestSequence = get().latestEventSequenceByConversationId[conversationId] ?? 0
+
+      try {
+        const eventsResult = await listConversationEvents(conversationId, { cursor: nextCursor })
+        recoveredMessages = eventsResult.events.reduce(
+          (currentMessages, event) => mergeConversationStatusEvent(currentMessages, event),
+          recoveredMessages,
+        )
+        recoveredDetail = reconcileDetailWithMessages(
+          {
+            ...recoveredDetail,
+            interactionState: eventsResult.interactionState ?? recoveredDetail.interactionState,
+          },
+          recoveredMessages,
+        )
+        nextCursor = eventsResult.nextCursor ?? null
+        latestSequence = eventsResult.latestSequence
+      } catch {
+        // Recovery still falls back to latest detail + messages when event replay is unavailable.
       }
 
-      const currentMessages = current.messagesByConversationId[conversationId] ?? []
-      const nextMessages = event.message ? upsertMessage(currentMessages, event.message) : currentMessages
-      const currentDetail = current.detailsByConversationId[conversationId]
-      const messageInteractionState = resolveInteractionStateFromMessage(event.message)
-      const activeTurnId =
-        shouldClearActiveTurnId(messageInteractionState)
-          ? undefined
-          : event.activeTurnId === null
-            ? undefined
-            : event.activeTurnId ?? currentDetail?.activeTurnId
-      const interactionState = messageInteractionState ?? event.interactionState ?? currentDetail?.interactionState
-      const nextPendingTurn =
-        event.eventType === "interaction.status_changed" || event.interactionState || messageInteractionState
-          ? pendingTurnFromInteractionState({
-              interactionState,
-              activeTurnId,
-              turnId: event.turnId,
-              sourceMessageId: event.messageId,
-            })
-          : current.pendingTurnByConversationId[conversationId] ?? { state: "idle" }
-      const nextPendingTurnStartedAtMsByConversationId = pendingTurnStartedAtMsByConversation(
-        current,
-        conversationId,
-        nextPendingTurn,
+      const pendingTurn = derivePendingTurnState(recoveredDetail, recoveredMessages, recoveredDetail.interactionState)
+      const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
+        recoveredMessages,
+        pendingTurn.turnId ?? recoveredDetail.activeTurnId,
       )
+
+      conversationRunBuffers.delete(conversationId)
+
+      set((current) => ({
+        detailsByConversationId: {
+          ...current.detailsByConversationId,
+          [conversationId]: recoveredDetail,
+        },
+        messagesByConversationId: {
+          ...current.messagesByConversationId,
+          [conversationId]: recoveredMessages,
+        },
+        pendingTurnByConversationId: {
+          ...current.pendingTurnByConversationId,
+          [conversationId]: pendingTurn,
+        },
+        pendingTurnStartedAtMsByConversationId: pendingTurnStartedAtMsByConversation(
+          current,
+          conversationId,
+          pendingTurn,
+          restoredStartedAtMs,
+        ),
+        eventCursorByConversationId: {
+          ...current.eventCursorByConversationId,
+          [conversationId]: nextCursor,
+        },
+        latestEventSequenceByConversationId: {
+          ...current.latestEventSequenceByConversationId,
+          [conversationId]: latestSequence,
+        },
+        error: null,
+      }))
+
+      const selectedWorkspace = get().selectedWorkspace
+      if (
+        selectedWorkspace?.kind === "conversation" &&
+        selectedWorkspace.conversationId === conversationId &&
+        shouldStreamPendingTurn(pendingTurn)
+      ) {
+        await startRealtimeRun(conversationId, recoveredDetail, recoveredMessages)
+      }
+    } catch (error) {
+      set({ error: toMessage(error) })
+    }
+  }
+
+  function applyRunEvent(conversationId: string, event: ConversationAgUiEventApi): void {
+    conversationRunReconnectAttempts.set(conversationId, 0)
+
+    set((current) => {
+      const currentDetail = current.detailsByConversationId[conversationId]
+      const currentMessages = current.messagesByConversationId[conversationId] ?? []
+      if (!currentDetail) return current
+
+      let nextDetail = currentDetail
+      let nextMessages = currentMessages
+      let pendingError = current.error
+
+      const applyRuntimeMessages = (status?: ConversationMessageSummary["status"]): void => {
+        const runtimeMessages =
+          status !== undefined
+            ? markRunMessagesStatus(conversationId, status)
+            : appendRunEvent(
+                conversationId,
+                currentDetail.activeTurnId ?? runIdFromEvent(event) ?? createId("turn"),
+                event,
+              )
+
+        nextMessages = runtimeMessages.reduce(
+          (messages, runtimeMessage) => upsertMessage(messages, runtimeMessage),
+          nextMessages,
+        )
+      }
+
+      const stateSnapshot = mapAgUiEventsToStateSnapshot([event])
+      const stateInteraction = stateSnapshot?.interaction?.status
+
+      switch (event.type) {
+        case "RUN_STARTED":
+          nextDetail = {
+            ...nextDetail,
+            interactionState: "thinking",
+            activeTurnId: event.runId ?? nextDetail.activeTurnId,
+          }
+          break
+        case "RUN_FINISHED":
+          applyRuntimeMessages("responded")
+          nextDetail = {
+            ...nextDetail,
+            interactionState: "completed",
+            activeTurnId: undefined,
+          }
+          break
+        case "RUN_ERROR":
+          applyRuntimeMessages("failed")
+          nextDetail = {
+            ...nextDetail,
+            interactionState: "error",
+            activeTurnId: undefined,
+          }
+          pendingError =
+            (typeof event.error?.message === "string" && event.error.message.trim()) ||
+            translate("conversation.serviceUnavailable")
+          break
+        case "ACTIVITY_SNAPSHOT":
+        case "ACTIVITY_DELTA":
+        case "TEXT_MESSAGE_START":
+        case "TEXT_MESSAGE_CONTENT":
+        case "TEXT_MESSAGE_END":
+        case "CUSTOM":
+          applyRuntimeMessages()
+          break
+        case "STATE_SNAPSHOT":
+        case "STATE_DELTA":
+          applyRuntimeMessages()
+          if (stateInteraction) {
+            nextDetail = {
+              ...nextDetail,
+              interactionState: stateInteraction,
+              activeTurnId: shouldClearActiveTurnId(stateInteraction)
+                ? undefined
+                : nextDetail.activeTurnId ?? currentDetail.activeTurnId,
+            }
+          }
+          break
+        default:
+          break
+      }
+
+      nextDetail = reconcileDetailWithMessages(nextDetail, nextMessages)
+
+      const pendingTurn = derivePendingTurnState(nextDetail, nextMessages, nextDetail.interactionState)
 
       return {
         ...current,
-        detailsByConversationId: currentDetail
-          ? {
-              ...current.detailsByConversationId,
-              [conversationId]: {
-                ...currentDetail,
-                ...(interactionState ? { interactionState } : {}),
-                activeTurnId,
-              },
-            }
-          : current.detailsByConversationId,
+        detailsByConversationId: {
+          ...current.detailsByConversationId,
+          [conversationId]: nextDetail,
+        },
         messagesByConversationId: {
           ...current.messagesByConversationId,
           [conversationId]: nextMessages,
         },
+        conversations: replaceConversation(current.conversations, nextDetail),
         pendingTurnByConversationId: {
           ...current.pendingTurnByConversationId,
-          [conversationId]: nextPendingTurn,
+          [conversationId]: pendingTurn,
         },
-        pendingTurnStartedAtMsByConversationId: nextPendingTurnStartedAtMsByConversationId,
-        latestEventSequenceByConversationId: {
-          ...current.latestEventSequenceByConversationId,
-          [conversationId]: event.sequence,
-        },
-        appliedStatusEventIdsByConversationId: {
-          ...current.appliedStatusEventIdsByConversationId,
-          [conversationId]: {
-            ...applied,
-            [event.statusEventId]: true,
-          },
-        },
+        pendingTurnStartedAtMsByConversationId: pendingTurnStartedAtMsByConversation(
+          current,
+          conversationId,
+          pendingTurn,
+        ),
+        error: pendingError,
       }
     })
   }
 
-  const applyAcceptedResponse = (accepted: MessageAcceptedResult): PendingTurnState => {
+  async function startRealtimeRun(
+    conversationId: string,
+    detail: ConversationDetail,
+    messages: ConversationMessageSummary[],
+  ): Promise<void> {
+    const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
+    const shouldStartRun = shouldStreamPendingTurn(pendingTurn) || (
+      detail.activeTurnId &&
+      messages.length > 0 &&
+      messages[messages.length - 1].role === "user"
+    )
+    if (!shouldStartRun) return
+    const selectedWorkspace = get().selectedWorkspace
+    if (selectedWorkspace?.kind !== "conversation" || selectedWorkspace.conversationId !== conversationId) {
+      return
+    }
+
+    stopConversationRun(conversationId)
+    conversationRunReconnectAttempts.set(conversationId, 0)
+
+    const runInput: ConversationRunInput = {
+      threadId: conversationId,
+      runId: detail.activeTurnId!,
+      messages: buildRunRequestMessages(messages),
+      state: buildRunRequestState(messages, detail.activeTurnId),
+    }
+
+    const abortController = new AbortController()
+    conversationRunAbortControllers.set(conversationId, abortController)
+
+    let receivedTerminalEvent = false
+
+    void startConversationRun(
+      runInput,
+      {
+        onEvent: (event) => {
+          if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+            receivedTerminalEvent = true
+          }
+          applyRunEvent(conversationId, event)
+        },
+      },
+      abortController.signal,
+    )
+      .then(async () => {
+        conversationRunAbortControllers.delete(conversationId)
+        if (abortController.signal.aborted) return
+        if (receivedTerminalEvent) {
+          conversationRunBuffers.delete(conversationId)
+          return
+        }
+        await recoverConversationAfterDisconnect(conversationId)
+      })
+      .catch(async (error) => {
+        conversationRunAbortControllers.delete(conversationId)
+        if (abortController.signal.aborted) return
+
+        set({ error: toMessage(error) })
+        await recoverConversationAfterDisconnect(conversationId)
+      })
+  }
+
+  function applyAcceptedResponse(accepted: MessageAcceptedResult): PendingTurnState {
     const conversationId = accepted.conversation.conversationId
-    const nextPollDelayMs = normalizeAcceptedPollDelay(accepted.nextPollAfterMs)
-    const pendingTurn = pendingTurnFromInteractionState({
-      interactionState: accepted.statusEvent.interactionState ?? accepted.conversation.interactionState,
-      activeTurnId: accepted.conversation.activeTurnId,
-      turnId: accepted.statusEvent.turnId ?? accepted.message.turnId,
-      sourceMessageId: accepted.statusEvent.messageId ?? accepted.message.messageId,
-    })
+    const nextMessages = upsertMessage(get().messagesByConversationId[conversationId] ?? [], accepted.message)
+    const activeTurnId = resolveAcceptedActiveTurnId(accepted)
+    const interactionState = resolveAcceptedInteractionState(accepted, activeTurnId)
+    const nextConversation = reconcileDetailWithMessages(
+      {
+        ...accepted.conversation,
+        interactionState,
+        activeTurnId,
+      },
+      nextMessages,
+    )
+    const pendingTurn = derivePendingTurnState(
+      nextConversation,
+      nextMessages,
+      interactionState ?? nextConversation.interactionState,
+    )
 
     set((current) => ({
       detailsByConversationId: {
         ...current.detailsByConversationId,
-        [conversationId]: accepted.conversation,
+        [conversationId]: nextConversation,
       },
       messagesByConversationId: {
         ...current.messagesByConversationId,
-        [conversationId]: upsertMessage(current.messagesByConversationId[conversationId] ?? [], accepted.message),
+        [conversationId]: nextMessages,
       },
-      conversations: replaceConversation(current.conversations, accepted.conversation),
+      conversations: replaceConversation(current.conversations, nextConversation),
       pendingTurnByConversationId: {
         ...current.pendingTurnByConversationId,
         [conversationId]: pendingTurn,
@@ -464,201 +860,25 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       ),
       nextPollAfterMsByConversationId: {
         ...current.nextPollAfterMsByConversationId,
-        [conversationId]: nextPollDelayMs,
+        [conversationId]: 0,
+      },
+      latestEventSequenceByConversationId: {
+        ...current.latestEventSequenceByConversationId,
+        [conversationId]: Math.max(
+          current.latestEventSequenceByConversationId[conversationId] ?? 0,
+          accepted.statusEvent.sequence,
+        ),
+      },
+      appliedStatusEventIdsByConversationId: {
+        ...current.appliedStatusEventIdsByConversationId,
+        [conversationId]: {
+          ...(current.appliedStatusEventIdsByConversationId[conversationId] ?? {}),
+          [accepted.statusEvent.statusEventId]: true,
+        },
       },
     }))
 
-    applyConversationStatusEvent(conversationId, accepted.statusEvent)
     return pendingTurn
-  }
-
-  const stopEventRefresh = (conversationId?: string | null): void => {
-    if (!conversationId) return
-    const existingHandle = conversationPollHandles.get(conversationId)
-    if (existingHandle) {
-      clearTimeout(existingHandle)
-      conversationPollHandles.delete(conversationId)
-    }
-  }
-
-  const isSelectedConversation = (conversationId: string): boolean => {
-    const selection = get().selectedWorkspace
-    return selection?.kind === "conversation" && selection.conversationId === conversationId
-  }
-
-  const pendingTurnRemainingMs = (conversationId: string): number | undefined => {
-    const state = get()
-    const pendingTurn = state.pendingTurnByConversationId[conversationId]
-    const startedAtMs = state.pendingTurnStartedAtMsByConversationId[conversationId]
-
-    if (pendingTurn?.state !== "thinking" || typeof startedAtMs !== "number") return undefined
-
-    return Math.max(PENDING_TURN_TIMEOUT_MS - (Date.now() - startedAtMs), 0)
-  }
-
-  const markPendingTurnTimedOut = (conversationId: string): void => {
-    set((current) => {
-      const pendingTurn = current.pendingTurnByConversationId[conversationId]
-      if (pendingTurn?.state !== "thinking") return current
-
-      const currentDetail = current.detailsByConversationId[conversationId]
-
-      return {
-        ...current,
-        error: translate("conversation.pendingTurnTimeout"),
-        detailsByConversationId: currentDetail
-          ? {
-              ...current.detailsByConversationId,
-              [conversationId]: {
-                ...currentDetail,
-                interactionState: "error",
-                activeTurnId: undefined,
-              },
-            }
-          : current.detailsByConversationId,
-        pendingTurnByConversationId: {
-          ...current.pendingTurnByConversationId,
-          [conversationId]: {
-            state: "error",
-            ...(pendingTurn.turnId ? { turnId: pendingTurn.turnId } : {}),
-            ...(pendingTurn.sourceMessageId ? { sourceMessageId: pendingTurn.sourceMessageId } : {}),
-          },
-        },
-        pendingTurnStartedAtMsByConversationId: omitRecordKey(
-          current.pendingTurnStartedAtMsByConversationId ?? {},
-          conversationId,
-        ),
-        submittingWorkspaceKey:
-          current.submittingWorkspaceKey === `conversation:${conversationId}` ? null : current.submittingWorkspaceKey,
-      }
-    })
-  }
-
-  const scheduleEventRefresh = (conversationId: string, delayMs: number): void => {
-    stopEventRefresh(conversationId)
-    const remainingMs = pendingTurnRemainingMs(conversationId)
-
-    if (remainingMs !== undefined && remainingMs <= 0) {
-      markPendingTurnTimedOut(conversationId)
-      return
-    }
-
-    const handle = setTimeout(async () => {
-      conversationPollHandles.delete(conversationId)
-      if (!isSelectedConversation(conversationId)) return
-      const remainingMs = pendingTurnRemainingMs(conversationId)
-
-      if (remainingMs !== undefined && remainingMs <= 0) {
-        markPendingTurnTimedOut(conversationId)
-        return
-      }
-
-      try {
-        const cursor = get().eventCursorByConversationId[conversationId] ?? null
-        const previousLatestSequence = get().latestEventSequenceByConversationId[conversationId] ?? 0
-        const result = await listConversationEvents(conversationId, { cursor })
-
-        for (const event of result.events) {
-          applyConversationStatusEvent(conversationId, event)
-        }
-
-        let pendingTurn = get().pendingTurnByConversationId[conversationId] ?? { state: "idle" }
-
-        if (result.interactionState && !result.hasMore && pendingTurn.state === "thinking") {
-          const detail = get().detailsByConversationId[conversationId]
-          pendingTurn = pendingTurnFromInteractionState({
-            interactionState: result.interactionState,
-            activeTurnId: detail?.activeTurnId,
-            turnId: pendingTurn.turnId,
-            sourceMessageId: pendingTurn.sourceMessageId,
-          })
-        }
-
-        let reconciledDetail: ConversationDetail | null = null
-
-        if (
-          !result.hasMore &&
-          pendingTurn.state === "thinking" &&
-          result.events.length === 0 &&
-          result.latestSequence <= previousLatestSequence
-        ) {
-          try {
-            const detail = await getConversationDetail(conversationId)
-            const reconciledPendingTurn = pendingTurnFromInteractionState({
-              interactionState: detail.interactionState,
-              activeTurnId: detail.activeTurnId,
-              turnId: pendingTurn.turnId,
-              sourceMessageId: pendingTurn.sourceMessageId,
-            })
-
-            if (reconciledPendingTurn.state !== pendingTurn.state) {
-              pendingTurn = reconciledPendingTurn
-              reconciledDetail = detail
-            }
-          } catch {
-            // Keep polling if the control-state reconciliation request fails.
-          }
-        }
-
-        const nextPollDelayMs = normalizeConversationRepollDelay(result.recommendedPollIntervalMs)
-
-        set((current) => ({
-          detailsByConversationId: reconciledDetail
-            ? {
-                ...current.detailsByConversationId,
-                [conversationId]: reconciledDetail,
-              }
-            : current.detailsByConversationId,
-          eventCursorByConversationId: {
-            ...current.eventCursorByConversationId,
-            [conversationId]: result.nextCursor ?? null,
-          },
-          nextPollAfterMsByConversationId: {
-            ...current.nextPollAfterMsByConversationId,
-            [conversationId]: nextPollDelayMs,
-          },
-          pendingTurnByConversationId: {
-            ...current.pendingTurnByConversationId,
-            [conversationId]: pendingTurn,
-          },
-          pendingTurnStartedAtMsByConversationId: pendingTurnStartedAtMsByConversation(
-            current,
-            conversationId,
-            pendingTurn,
-          ),
-          submittingWorkspaceKey:
-            current.submittingWorkspaceKey === `conversation:${conversationId}` ? null : current.submittingWorkspaceKey,
-        }))
-
-        if (
-          isSelectedConversation(conversationId) &&
-          shouldContinuePolling(get().pendingTurnByConversationId[conversationId] ?? pendingTurn, result.hasMore)
-        ) {
-          scheduleEventRefresh(conversationId, result.hasMore ? 0 : nextPollDelayMs)
-        }
-      } catch (error) {
-        set((current) => ({
-          error: toMessage(error),
-          pendingTurnByConversationId: {
-            ...current.pendingTurnByConversationId,
-            [conversationId]: {
-              state: "error",
-              ...(current.pendingTurnByConversationId[conversationId]?.turnId
-                ? { turnId: current.pendingTurnByConversationId[conversationId].turnId }
-                : {}),
-            },
-          },
-          pendingTurnStartedAtMsByConversationId: omitRecordKey(
-            current.pendingTurnStartedAtMsByConversationId ?? {},
-            conversationId,
-          ),
-          submittingWorkspaceKey:
-            current.submittingWorkspaceKey === `conversation:${conversationId}` ? null : current.submittingWorkspaceKey,
-        }))
-      }
-    }, Math.max(0, remainingMs === undefined ? delayMs : Math.min(delayMs, remainingMs)))
-
-    conversationPollHandles.set(conversationId, handle)
   }
 
   return {
@@ -672,6 +892,11 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
     localDraftWorkspace: persistedWorkspaceState.localDraftWorkspace,
     detailsByConversationId: {},
     messagesByConversationId: {},
+    draftsByKey: loadDraftForSelection(
+      persistedWorkspaceState.selectedWorkspace,
+      persistedWorkspaceState.localDraftWorkspace,
+      {},
+    ),
     pendingTurnByConversationId: {},
     pendingTurnStartedAtMsByConversationId: {},
     nextPollAfterMsByConversationId: {},
@@ -679,11 +904,6 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
     latestEventSequenceByConversationId: {},
     appliedStatusEventIdsByConversationId: {},
     submittingWorkspaceKey: null,
-    draftsByKey: loadDraftForSelection(
-      persistedWorkspaceState.selectedWorkspace,
-      persistedWorkspaceState.localDraftWorkspace,
-      {},
-    ),
 
     hydrate: async () => {
       set({ listLoading: true, error: null })
@@ -691,76 +911,72 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       try {
         const conversations = await listConversations()
         const state = get()
+        const previouslySelectedConversationId =
+          state.selectedWorkspace?.kind === "conversation" ? state.selectedWorkspace.conversationId : undefined
 
-      let localDraftWorkspace = state.localDraftWorkspace
-      let selectedWorkspace = state.selectedWorkspace
-      const previouslySelectedConversationId =
-        state.selectedWorkspace?.kind === "conversation" ? state.selectedWorkspace.conversationId : undefined
-      const selectedConversationId =
-        selectedWorkspace?.kind === "conversation" ? selectedWorkspace.conversationId : null
+        let localDraftWorkspace = state.localDraftWorkspace
+        let selectedWorkspace = state.selectedWorkspace
+        const selectedConversationId =
+          selectedWorkspace?.kind === "conversation" ? selectedWorkspace.conversationId : null
 
-      if (selectedConversationId && !conversations.some((conversation) => conversation.conversationId === selectedConversationId)) {
-        selectedWorkspace = null
-      }
+        if (selectedConversationId && !conversations.some((conversation) => conversation.conversationId === selectedConversationId)) {
+          selectedWorkspace = null
+        }
 
-      if (selectedWorkspace?.kind === "localDraft") {
-        if (!localDraftWorkspace || localDraftWorkspace.localDraftId !== selectedWorkspace.localDraftId) {
-          localDraftWorkspace = createLocalDraftWorkspace()
+        if (selectedWorkspace?.kind === "localDraft") {
+          if (!localDraftWorkspace || localDraftWorkspace.localDraftId !== selectedWorkspace.localDraftId) {
+            localDraftWorkspace = createLocalDraftWorkspace()
+            selectedWorkspace = {
+              kind: "localDraft",
+              localDraftId: localDraftWorkspace.localDraftId,
+            }
+          }
+        }
+
+        if (!selectedWorkspace) {
+          localDraftWorkspace = localDraftWorkspace ?? createLocalDraftWorkspace()
           selectedWorkspace = {
             kind: "localDraft",
             localDraftId: localDraftWorkspace.localDraftId,
           }
         }
-      }
 
-      if (!selectedWorkspace) {
-        localDraftWorkspace = localDraftWorkspace ?? createLocalDraftWorkspace()
-        selectedWorkspace = {
-          kind: "localDraft",
-          localDraftId: localDraftWorkspace.localDraftId,
+        const resolvedSelectedWorkspace = selectedWorkspace as ConversationWorkspaceSelection
+        const draftsByKey = loadDraftForSelection(resolvedSelectedWorkspace, localDraftWorkspace, state.draftsByKey)
+
+        if (
+          previouslySelectedConversationId &&
+          (resolvedSelectedWorkspace.kind !== "conversation" ||
+            resolvedSelectedWorkspace.conversationId !== previouslySelectedConversationId)
+        ) {
+          stopConversationRun(previouslySelectedConversationId)
         }
-      }
 
-      const resolvedSelectedWorkspace = selectedWorkspace as ConversationWorkspaceSelection
-      const draftsByKey = loadDraftForSelection(resolvedSelectedWorkspace, localDraftWorkspace, state.draftsByKey)
+        set({
+          conversations,
+          selectedWorkspace: resolvedSelectedWorkspace,
+          localDraftWorkspace,
+          draftsByKey,
+          listLoading: false,
+          bootstrapped: true,
+        })
 
-      if (
-        previouslySelectedConversationId &&
-        (resolvedSelectedWorkspace.kind !== "conversation" ||
-          resolvedSelectedWorkspace.conversationId !== previouslySelectedConversationId)
-      ) {
-        stopEventRefresh(previouslySelectedConversationId)
-      }
-
-      set({
-        conversations,
-        selectedWorkspace: resolvedSelectedWorkspace,
-        localDraftWorkspace,
-        draftsByKey,
-        listLoading: false,
-        bootstrapped: true,
-      })
-
-      persistWorkspaceState({ selectedWorkspace: resolvedSelectedWorkspace, localDraftWorkspace })
+        persistWorkspaceState({ selectedWorkspace: resolvedSelectedWorkspace, localDraftWorkspace })
 
         if (resolvedSelectedWorkspace.kind === "conversation") {
           set({ conversationLoading: true })
           const { detail, messages } = await loadConversationPayload(resolvedSelectedWorkspace.conversationId)
-          const reconciledDetail = reconcileDetailWithMessages(detail, messages)
-          const pendingTurn = pendingTurnFromInteractionState({
-            interactionState: reconciledDetail.interactionState,
-            activeTurnId: reconciledDetail.activeTurnId,
-          })
+          const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
           const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
             messages,
-            pendingTurn.turnId ?? reconciledDetail.activeTurnId,
+            pendingTurn.turnId ?? detail.activeTurnId,
           )
 
           set((current) => ({
             conversationLoading: false,
             detailsByConversationId: {
               ...current.detailsByConversationId,
-              [detail.conversationId]: reconciledDetail,
+              [detail.conversationId]: detail,
             },
             messagesByConversationId: {
               ...current.messagesByConversationId,
@@ -778,9 +994,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
             ),
           }))
 
-          if (shouldContinuePolling(pendingTurn)) {
-            scheduleEventRefresh(detail.conversationId, DEFAULT_CONVERSATION_POLL_DELAY_MS)
-          }
+          await startRealtimeRun(detail.conversationId, detail, messages)
         }
       } catch (error) {
         const localDraftWorkspace = get().localDraftWorkspace ?? createLocalDraftWorkspace()
@@ -792,7 +1006,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           localDraftId: localDraftWorkspace.localDraftId,
         }
 
-        stopEventRefresh(previouslySelectedConversationId)
+        stopConversationRun(previouslySelectedConversationId)
 
         set((current) => ({
           error: toMessage(error),
@@ -818,7 +1032,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       }
       const draftsByKey = loadDraftForSelection(selectedWorkspace, localDraftWorkspace, state.draftsByKey)
 
-      stopEventRefresh(previouslySelectedConversationId)
+      stopConversationRun(previouslySelectedConversationId)
 
       set({
         selectedWorkspace,
@@ -840,7 +1054,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       }
       const draftsByKey = loadDraftForSelection(selectedWorkspace, state.localDraftWorkspace, state.draftsByKey)
 
-      stopEventRefresh(previouslySelectedConversationId)
+      if (previouslySelectedConversationId && previouslySelectedConversationId !== conversationId) {
+        stopConversationRun(previouslySelectedConversationId)
+      }
 
       set({
         selectedWorkspace,
@@ -853,21 +1069,17 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
       try {
         const { detail, messages } = await loadConversationPayload(conversationId)
-        const reconciledDetail = reconcileDetailWithMessages(detail, messages)
-        const pendingTurn = pendingTurnFromInteractionState({
-          interactionState: reconciledDetail.interactionState,
-          activeTurnId: reconciledDetail.activeTurnId,
-        })
+        const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
         const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
           messages,
-          pendingTurn.turnId ?? reconciledDetail.activeTurnId,
+          pendingTurn.turnId ?? detail.activeTurnId,
         )
 
         set((current) => ({
           conversationLoading: false,
           detailsByConversationId: {
             ...current.detailsByConversationId,
-            [conversationId]: reconciledDetail,
+            [conversationId]: detail,
           },
           messagesByConversationId: {
             ...current.messagesByConversationId,
@@ -885,9 +1097,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           ),
         }))
 
-        if (shouldContinuePolling(pendingTurn)) {
-          scheduleEventRefresh(conversationId, DEFAULT_CONVERSATION_POLL_DELAY_MS)
-        }
+        await startRealtimeRun(conversationId, detail, messages)
       } catch (error) {
         set({ conversationLoading: false, error: toMessage(error) })
         throw error
@@ -1001,11 +1211,13 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
             localDraftWorkspace: nextLocalDraftWorkspace,
           })
 
-          if (shouldContinuePolling(pendingTurn)) {
-            scheduleEventRefresh(
-              accepted.conversation.conversationId,
-              normalizeAcceptedPollDelay(accepted.nextPollAfterMs),
-            )
+          if (shouldStreamPendingTurn(pendingTurn)) {
+            const conversationId = accepted.conversation.conversationId
+            const detail = get().detailsByConversationId[conversationId]
+            const messages = get().messagesByConversationId[conversationId] ?? []
+            if (detail) {
+              await startRealtimeRun(conversationId, detail, messages)
+            }
           }
           return
         }
@@ -1015,8 +1227,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           content,
         })
 
-        removeConversationDraft(draftKey)
         const pendingTurn = applyAcceptedResponse(accepted)
+
+        removeConversationDraft(draftKey)
 
         set((current) => ({
           draftsByKey: {
@@ -1027,8 +1240,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           error: null,
         }))
 
-        if (shouldContinuePolling(pendingTurn)) {
-          scheduleEventRefresh(selection.conversationId, normalizeAcceptedPollDelay(accepted.nextPollAfterMs))
+        if (shouldStreamPendingTurn(pendingTurn)) {
+          const detail = get().detailsByConversationId[selection.conversationId]
+          const messages = get().messagesByConversationId[selection.conversationId] ?? []
+          if (detail) {
+            await startRealtimeRun(selection.conversationId, detail, messages)
+          }
         }
       } catch (error) {
         set((current) => ({
@@ -1075,8 +1292,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
         set({ error: null })
 
-        if (shouldContinuePolling(pendingTurn)) {
-          scheduleEventRefresh(selection.conversationId, normalizeAcceptedPollDelay(accepted.nextPollAfterMs))
+        if (shouldStreamPendingTurn(pendingTurn)) {
+          const detail = get().detailsByConversationId[selection.conversationId]
+          const messages = get().messagesByConversationId[selection.conversationId] ?? []
+          if (detail) {
+            await startRealtimeRun(selection.conversationId, detail, messages)
+          }
         }
       } catch (error) {
         set((current) => ({
@@ -1122,8 +1343,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
         set({ error: null })
 
-        if (shouldContinuePolling(pendingTurn)) {
-          scheduleEventRefresh(selection.conversationId, normalizeAcceptedPollDelay(accepted.nextPollAfterMs))
+        if (shouldStreamPendingTurn(pendingTurn)) {
+          const detail = get().detailsByConversationId[selection.conversationId]
+          const messages = get().messagesByConversationId[selection.conversationId] ?? []
+          if (detail) {
+            await startRealtimeRun(selection.conversationId, detail, messages)
+          }
         }
       } catch (error) {
         set((current) => ({
@@ -1158,9 +1383,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
       try {
         const accepted = await sendMessage(selection.conversationId, {
-          type: "user_message",
+          ...input,
           content,
-        })
+        } as CreateConversationMessageInput)
         const pendingTurn = applyAcceptedResponse(accepted)
 
         set({
@@ -1168,8 +1393,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           submittingWorkspaceKey: null,
         })
 
-        if (shouldContinuePolling(pendingTurn)) {
-          scheduleEventRefresh(selection.conversationId, normalizeAcceptedPollDelay(accepted.nextPollAfterMs))
+        if (shouldStreamPendingTurn(pendingTurn)) {
+          const detail = get().detailsByConversationId[selection.conversationId]
+          const messages = get().messagesByConversationId[selection.conversationId] ?? []
+          if (detail) {
+            await startRealtimeRun(selection.conversationId, detail, messages)
+          }
         }
       } catch (error) {
         set((current) => ({
