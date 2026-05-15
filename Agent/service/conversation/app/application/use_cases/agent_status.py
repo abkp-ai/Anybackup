@@ -98,7 +98,7 @@ class CoreAgentStatusEventHandler:
                     }
                 else:
                     target_message = _transition_message(message, MessageStatus.PROCESSING, now_ms)
-                    target_active_run_id = _core_run_id(command, turn_id)
+                    target_active_run_id = str(turn_id)
                     event_type = "message.updated"
                     title = "Core Agent accepted"
                     detail = "Core Agent accepted the user message"
@@ -161,6 +161,18 @@ class CoreAgentStatusEventHandler:
             if target_message != message:
                 await unit_of_work.messages.update(target_message)
             await unit_of_work.status_events.add(primary_event)
+
+            terminal_event = await _build_terminal_event(
+                command=command,
+                event_kind=event_kind,
+                turn_id=turn_id,
+                now_ms=now_ms,
+                id_generator=self._id_generator,
+                unit_of_work=unit_of_work,
+            )
+            if terminal_event is not None:
+                await unit_of_work.status_events.add(terminal_event)
+
             logger.info(
                 "core_agent_status_event_persisted",
                 extra={
@@ -234,6 +246,52 @@ def _error_payload(command: CoreAgentStatusEventCommand, section_name: str) -> d
         else content,
         "retryable": bool(section.get("retryable", False)),
     }
+
+
+async def _build_terminal_event(
+    *,
+    command: CoreAgentStatusEventCommand,
+    event_kind: str,
+    turn_id: int,
+    now_ms: int,
+    id_generator: IdGenerator,
+    unit_of_work: UnitOfWork,
+) -> ConversationStatusEventRecord | None:
+    if event_kind == "completed":
+        event_type = "RUN_FINISHED"
+    elif event_kind in {"rejected", "failed"}:
+        event_type = "RUN_ERROR"
+    else:
+        return None
+
+    sequence = await unit_of_work.status_events.next_sequence(command.conversation_id)
+    payload: dict[str, Any] = {
+        "type": event_type,
+        "threadId": str(command.conversation_id),
+        "runId": str(turn_id),
+        "timestamp": now_ms,
+    }
+    if event_type == "RUN_ERROR":
+        error_section = _section(command.payload, event_kind)
+        payload["message"] = error_section.get("message") or str(error_section.get("code") or "core agent failure")
+        if "code" in error_section:
+            payload["code"] = error_section["code"]
+
+    return ConversationStatusEventRecord(
+        status_event_id=id_generator.next_id(),
+        conversation_id=command.conversation_id,
+        message_id=command.message_id or turn_id,
+        turn_id=turn_id,
+        event_type=event_type,
+        sequence=sequence,
+        title=f"Run {'finished' if event_type == 'RUN_FINISHED' else 'error'}",
+        detail=None,
+        payload=payload,
+        trace_id=command.trace_id,
+        correlation_id=command.correlation_id,
+        created_time=now_ms,
+        updated_time=now_ms,
+    )
 
 
 def _section(payload: dict[str, Any], section_name: str) -> dict[str, Any]:

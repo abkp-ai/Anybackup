@@ -154,6 +154,7 @@ class AgentMqMockRunner:
         sequence_numbers = self._tracker.reserve_ag_ui_sequences(
             incoming.conversation_id,
             len(steps),
+            message_id=incoming.message_id,
         )
         replay_output = should_replay(incoming)
         for step, sequence in zip(steps, sequence_numbers, strict=True):
