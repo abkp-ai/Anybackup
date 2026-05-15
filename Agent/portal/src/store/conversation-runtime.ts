@@ -1,8 +1,13 @@
+import { emitDebugLog } from "@/lib/debug-log"
 import type {
   ConversationDetail,
   ConversationMessageSummary,
   ConversationStatusEvent,
 } from "@/types/conversation"
+
+export type DerivePendingTurnOptions = {
+  treatStaleUserOnlyAsComplete?: boolean
+}
 
 export type PendingTurnState =
   | {
@@ -108,15 +113,94 @@ export function mergeConversationStatusEvent(
   return [...nextMessages, event.message]
 }
 
-function deriveInteractionStateFromMessages(
+const TERMINAL_MESSAGE_STATUSES = new Set<ConversationMessageSummary["status"]>(["responded", "failed"])
+const STALE_USER_ONLY_TURN_MS = 2 * 60 * 1000
+
+function shouldClearActiveTurnId(interactionState?: ConversationDetail["interactionState"]): boolean {
+  return interactionState === "idle" || interactionState === "completed" || interactionState === "error"
+}
+
+function toTimestampMs(value?: string): number | undefined {
+  if (!value) return undefined
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? timestamp : undefined
+}
+
+function turnMessagesForActiveId(
+  messages: ConversationMessageSummary[],
+  activeTurnId: string,
+): ConversationMessageSummary[] {
+  return messages.filter((message) => !message.turnId || message.turnId === activeTurnId)
+}
+
+export function isStaleUserOnlyActiveTurn(
+  detail: ConversationDetail,
+  messages: ConversationMessageSummary[],
+): boolean {
+  if (!detail.activeTurnId) return false
+
+  const turnMessages = turnMessagesForActiveId(messages, detail.activeTurnId)
+  if (!turnMessages.some((message) => message.role === "user")) return false
+  if (turnMessages.some((message) => message.role !== "user")) return false
+
+  const userTimestamps = turnMessages
+    .filter((message) => message.role === "user")
+    .map((message) => toTimestampMs(message.createdAt))
+    .filter((timestamp): timestamp is number => typeof timestamp === "number")
+
+  const lastActivityMs = Math.max(
+    ...(userTimestamps.length > 0 ? userTimestamps : [0]),
+    toTimestampMs(detail.updatedAt) ?? 0,
+  )
+
+  if (!Number.isFinite(lastActivityMs) || lastActivityMs <= 0) return false
+
+  return Date.now() - lastActivityMs > STALE_USER_ONLY_TURN_MS
+}
+
+export function isActiveTurnSettled(
+  messages: ConversationMessageSummary[],
+  activeTurnId?: string,
+): boolean {
+  if (!activeTurnId) return false
+
+  return messages.some(
+    (message) =>
+      (!message.turnId || message.turnId === activeTurnId) &&
+      message.role !== "user" &&
+      message.status !== undefined &&
+      TERMINAL_MESSAGE_STATUSES.has(message.status),
+  )
+}
+
+export function isTurnCompleteForRestore(
+  detail: ConversationDetail,
+  messages: ConversationMessageSummary[],
+  fallbackInteractionState?: ConversationDetail["interactionState"],
+  options?: DerivePendingTurnOptions,
+): boolean {
+  if (!detail.activeTurnId) return false
+  if (options?.treatStaleUserOnlyAsComplete && isStaleUserOnlyActiveTurn(detail, messages)) return true
+  if (!isActiveTurnSettled(messages, detail.activeTurnId)) return false
+  if (deriveInteractionStateFromMessages(messages, detail.activeTurnId)) return false
+
+  const fallback = fallbackInteractionState ?? detail.interactionState
+  const fallbackLooksLive =
+    fallback !== undefined &&
+    fallback !== detail.interactionState &&
+    (fallback === "thinking" || fallback === "executing")
+
+  return !fallbackLooksLive
+}
+
+export function deriveInteractionStateFromMessages(
   messages: ConversationMessageSummary[],
   activeTurnId?: string,
 ): ConversationDetail["interactionState"] | undefined {
-  const terminalStatuses = new Set<ConversationMessageSummary["status"]>(["responded", "failed"])
   const candidates = [...messages]
     .filter((message) => {
       if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false
-      if (message.status && terminalStatuses.has(message.status)) return false
+      if (message.status && TERMINAL_MESSAGE_STATUSES.has(message.status)) return false
       return message.richPayload?.kind === "layout_tree"
     })
     .reverse()
@@ -136,12 +220,48 @@ export function derivePendingTurnState(
   messages: ConversationMessageSummary[],
   fallbackInteractionState?: ConversationDetail["interactionState"],
   fallbackSourceMessageId?: string,
+  options?: DerivePendingTurnOptions,
 ): PendingTurnState {
-  const interactionState =
-    deriveInteractionStateFromMessages(messages, detail.activeTurnId) ??
-    fallbackInteractionState ??
-    detail.interactionState
+  if (isTurnCompleteForRestore(detail, messages, fallbackInteractionState, options)) {
+    // #region agent log
+    emitDebugLog({
+      location: "conversation-runtime.ts:derivePendingTurnState",
+      message: "pending turn forced idle for completed restore",
+      hypothesisId: "H-F",
+      data: {
+        conversationId: detail.conversationId,
+        activeTurnId: detail.activeTurnId,
+        staleUserOnly: options?.treatStaleUserOnlyAsComplete
+          ? isStaleUserOnlyActiveTurn(detail, messages)
+          : false,
+        settled: detail.activeTurnId ? isActiveTurnSettled(messages, detail.activeTurnId) : false,
+      },
+    })
+    // #endregion
+    return { state: "idle" }
+  }
+
+  const fromMessages = deriveInteractionStateFromMessages(messages, detail.activeTurnId)
+  const interactionState = fromMessages ?? fallbackInteractionState ?? detail.interactionState
   const turnId = detail.activeTurnId ?? messages[messages.length - 1]?.turnId
+
+  // #region agent log
+  if (interactionState === "thinking" || interactionState === "executing") {
+    emitDebugLog({
+      location: "conversation-runtime.ts:derivePendingTurnState",
+      message: "pending turn resolved to thinking",
+      hypothesisId: "H-C",
+      data: {
+        conversationId: detail.conversationId,
+        fromMessages,
+        fallbackInteractionState,
+        detailInteractionState: detail.interactionState,
+        resolvedInteractionState: interactionState,
+        activeTurnId: detail.activeTurnId,
+      },
+    })
+  }
+  // #endregion
 
   if (interactionState === "clarifying") {
     return {
@@ -156,6 +276,10 @@ export function derivePendingTurnState(
       state: "thinking",
       ...(turnId ? { turnId } : {}),
     }
+  }
+
+  if (shouldClearActiveTurnId(interactionState)) {
+    return { state: "idle" }
   }
 
   if (interactionState === "error") {

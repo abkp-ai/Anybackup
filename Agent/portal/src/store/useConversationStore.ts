@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { createId } from "@/lib/ids"
+import { emitDebugLog } from "@/lib/debug-log"
 import { translate } from "@/i18n/messages"
 import {
   conversationDraftKeyForConversation,
@@ -44,10 +45,18 @@ import type {
   UserMessageInput,
 } from "@/types/conversation"
 import {
+  deriveInteractionStateFromMessages,
   derivePendingTurnState,
+  isActiveTurnSettled,
+  isTurnCompleteForRestore,
   mergeConversationStatusEvent,
+  type DerivePendingTurnOptions,
   type PendingTurnState,
 } from "@/store/conversation-runtime"
+
+const RESTORE_PENDING_TURN_OPTIONS: DerivePendingTurnOptions = {
+  treatStaleUserOnlyAsComplete: true,
+}
 
 interface ConversationState {
   bootstrapped: boolean
@@ -225,29 +234,34 @@ function shouldClearActiveTurnId(interactionState?: ConversationDetail["interact
   return interactionState === "idle" || interactionState === "completed" || interactionState === "error"
 }
 
-function resolveInteractionStateFromMessages(
-  messages: ConversationMessageSummary[],
-  activeTurnId?: string,
-): ConversationDetail["interactionState"] | undefined {
-  const candidates = [...messages]
-    .filter((message) => {
-      if (activeTurnId && message.turnId && message.turnId !== activeTurnId) return false
-      return message.richPayload?.kind === "layout_tree"
-    })
-    .reverse()
-
-  for (const message of candidates) {
-    const interactionState =
-      message.richPayload?.kind === "layout_tree" ? message.richPayload.data.stateSnapshot?.interaction?.status : undefined
-
-    if (interactionState) return interactionState
+function reconcileDetailWithMessages(detail: ConversationDetail, messages: ConversationMessageSummary[]): ConversationDetail {
+  if (detail.activeTurnId && isActiveTurnSettled(messages, detail.activeTurnId)) {
+    return {
+      ...detail,
+      interactionState: "completed",
+      activeTurnId: undefined,
+    }
   }
 
-  return undefined
-}
+  const fromMessages = deriveInteractionStateFromMessages(messages, detail.activeTurnId)
+  const interactionState = fromMessages ?? detail.interactionState
 
-function reconcileDetailWithMessages(detail: ConversationDetail, messages: ConversationMessageSummary[]): ConversationDetail {
-  const interactionState = resolveInteractionStateFromMessages(messages, detail.activeTurnId) ?? detail.interactionState
+  // #region agent log
+  if (fromMessages && fromMessages !== detail.interactionState) {
+    emitDebugLog({
+      location: "useConversationStore.ts:reconcileDetailWithMessages",
+      message: "interactionState overridden from layout_tree messages",
+      hypothesisId: "H-B",
+      data: {
+        conversationId: detail.conversationId,
+        apiInteractionState: detail.interactionState,
+        fromMessages,
+        activeTurnId: detail.activeTurnId,
+        willClearActiveTurnId: shouldClearActiveTurnId(interactionState),
+      },
+    })
+  }
+  // #endregion
 
   return {
     ...detail,
@@ -531,15 +545,90 @@ async function loadConversationPayload(conversationId: string): Promise<{
   detail: ConversationDetail
   messages: ConversationMessageSummary[]
 }> {
-  const [detail, messages] = await Promise.all([getConversationDetail(conversationId), getConversationMessages(conversationId)])
+  const [apiDetail, messages] = await Promise.all([getConversationDetail(conversationId), getConversationMessages(conversationId)])
+  const detail = reconcileDetailWithMessages(apiDetail, messages)
+  const lastMessage = messages[messages.length - 1]
+
+  // #region agent log
+  emitDebugLog({
+    location: "useConversationStore.ts:loadConversationPayload",
+    message: "conversation payload loaded",
+    hypothesisId: "H-A,H-B",
+    data: {
+      conversationId,
+      apiInteractionState: apiDetail.interactionState,
+      apiActiveTurnId: apiDetail.activeTurnId,
+      reconciledInteractionState: detail.interactionState,
+      reconciledActiveTurnId: detail.activeTurnId,
+      messageCount: messages.length,
+      lastMessageRole: lastMessage?.role,
+      lastMessageStatus: lastMessage?.status,
+    },
+  })
+  // #endregion
 
   return {
-    detail: reconcileDetailWithMessages(detail, messages),
+    detail,
     messages,
   }
 }
 
 export const useConversationStore = create<ConversationStore>((set, get) => {
+  async function loadHistoricalEvents(
+    conversationId: string,
+    detail: ConversationDetail,
+    messages: ConversationMessageSummary[],
+  ): Promise<void> {
+    try {
+      const eventsResult = await listConversationEvents(conversationId, { cursor: null })
+      const recoveredMessages = eventsResult.events.reduce(
+        (currentMessages, event) => mergeConversationStatusEvent(currentMessages, event),
+        messages,
+      )
+      const recoveredDetail = reconcileDetailWithMessages(
+        {
+          ...detail,
+          interactionState: eventsResult.interactionState ?? detail.interactionState,
+        },
+        recoveredMessages,
+      )
+      const pendingTurn = derivePendingTurnState(
+        recoveredDetail,
+        recoveredMessages,
+        recoveredDetail.interactionState,
+        undefined,
+        RESTORE_PENDING_TURN_OPTIONS,
+      )
+      const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
+        recoveredMessages,
+        pendingTurn.turnId ?? recoveredDetail.activeTurnId,
+      )
+
+      set((current) => ({
+        detailsByConversationId: {
+          ...current.detailsByConversationId,
+          [conversationId]: recoveredDetail,
+        },
+        messagesByConversationId: {
+          ...current.messagesByConversationId,
+          [conversationId]: recoveredMessages,
+        },
+        pendingTurnByConversationId: {
+          ...current.pendingTurnByConversationId,
+          [conversationId]: pendingTurn,
+        },
+        pendingTurnStartedAtMsByConversationId: pendingTurnStartedAtMsByConversation(
+          current,
+          conversationId,
+          pendingTurn,
+          restoredStartedAtMs,
+        ),
+      }))
+    } catch {
+      // If events can't be loaded, keep the basic messages
+    }
+  }
+
   async function recoverConversationAfterDisconnect(conversationId: string): Promise<void> {
     if (!conversationRunReconnectAttempts.has(conversationId)) {
       conversationRunReconnectAttempts.set(conversationId, 0)
@@ -595,11 +684,34 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
         // Recovery still falls back to latest detail + messages when event replay is unavailable.
       }
 
-      const pendingTurn = derivePendingTurnState(recoveredDetail, recoveredMessages, recoveredDetail.interactionState)
+      const pendingTurn = derivePendingTurnState(
+        recoveredDetail,
+        recoveredMessages,
+        recoveredDetail.interactionState,
+        undefined,
+        RESTORE_PENDING_TURN_OPTIONS,
+      )
       const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
         recoveredMessages,
         pendingTurn.turnId ?? recoveredDetail.activeTurnId,
       )
+      const willRestartStream = shouldStreamPendingTurn(pendingTurn)
+
+      // #region agent log
+      emitDebugLog({
+        location: "useConversationStore.ts:recoverConversationAfterDisconnect",
+        message: "run recovery evaluated",
+        hypothesisId: "H-E",
+        data: {
+          conversationId,
+          attempt: currentAttempt,
+          pendingTurnState: pendingTurn.state,
+          willRestartStream,
+          recoveredInteractionState: recoveredDetail.interactionState,
+          recoveredActiveTurnId: recoveredDetail.activeTurnId,
+        },
+      })
+      // #endregion
 
       conversationRunBuffers.delete(conversationId)
 
@@ -637,9 +749,9 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       if (
         selectedWorkspace?.kind === "conversation" &&
         selectedWorkspace.conversationId === conversationId &&
-        shouldStreamPendingTurn(pendingTurn)
+        willRestartStream
       ) {
-        await startRealtimeRun(conversationId, recoveredDetail, recoveredMessages)
+        await startRealtimeRun(conversationId, recoveredDetail, recoveredMessages, { restoreMode: true })
       }
     } catch (error) {
       set({ error: toMessage(error) })
@@ -762,17 +874,47 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
     conversationId: string,
     detail: ConversationDetail,
     messages: ConversationMessageSummary[],
+    options?: { restoreMode?: boolean },
   ): Promise<void> {
-    const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
-    const effectiveRunId = detail.activeTurnId ?? (
-      messages.length > 0 && messages[messages.length - 1].role === "user"
-        ? messages[messages.length - 1].turnId
-        : undefined
+    const pendingTurnOptions = options?.restoreMode ? RESTORE_PENDING_TURN_OPTIONS : undefined
+    const pendingTurn = derivePendingTurnState(
+      detail,
+      messages,
+      detail.interactionState,
+      undefined,
+      pendingTurnOptions,
     )
-    const shouldStartRun = shouldStreamPendingTurn(pendingTurn) || (
-      typeof effectiveRunId === "string" && effectiveRunId
-    )
-    if (!shouldStartRun) return
+    const streamFromPendingTurn = shouldStreamPendingTurn(pendingTurn)
+    const streamFromUserTail =
+      typeof detail.activeTurnId === "string" &&
+      detail.activeTurnId.length > 0 &&
+      messages.length > 0 &&
+      messages[messages.length - 1].role === "user" &&
+      !isTurnCompleteForRestore(detail, messages, undefined, pendingTurnOptions)
+    const shouldStreamRun = streamFromPendingTurn || streamFromUserTail
+
+    // #region agent log
+    emitDebugLog({
+      location: "useConversationStore.ts:startRealtimeRun",
+      message: "run stream branch decision",
+      hypothesisId: "H-C,H-D",
+      data: {
+        conversationId,
+        pendingTurnState: pendingTurn.state,
+        streamFromPendingTurn,
+        streamFromUserTail,
+        shouldStreamRun,
+        detailInteractionState: detail.interactionState,
+        activeTurnId: detail.activeTurnId,
+        lastMessageRole: messages[messages.length - 1]?.role,
+      },
+    })
+    // #endregion
+
+    if (!shouldStreamRun) {
+      await loadHistoricalEvents(conversationId, detail, messages)
+      return
+    }
     const selectedWorkspace = get().selectedWorkspace
     if (selectedWorkspace?.kind !== "conversation" || selectedWorkspace.conversationId !== conversationId) {
       return
@@ -783,7 +925,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
     const runInput: ConversationRunInput = {
       threadId: conversationId,
-      runId: effectiveRunId!,
+      runId: detail.activeTurnId!,
       messages: buildRunRequestMessages(messages),
       state: buildRunRequestState(messages, detail.activeTurnId),
     }
@@ -997,7 +1139,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
             ),
           }))
 
-          await startRealtimeRun(detail.conversationId, detail, messages)
+          await startRealtimeRun(detail.conversationId, detail, messages, { restoreMode: true })
         }
       } catch (error) {
         const localDraftWorkspace = get().localDraftWorkspace ?? createLocalDraftWorkspace()
@@ -1072,21 +1214,49 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
       try {
         const { detail, messages } = await loadConversationPayload(conversationId)
-        const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
+        await loadHistoricalEvents(conversationId, detail, messages)
+
+        const refreshedDetail = get().detailsByConversationId[conversationId] ?? detail
+        const refreshedMessages = get().messagesByConversationId[conversationId] ?? messages
+        const pendingTurn =
+          get().pendingTurnByConversationId[conversationId] ??
+          derivePendingTurnState(
+            refreshedDetail,
+            refreshedMessages,
+            refreshedDetail.interactionState,
+            undefined,
+            RESTORE_PENDING_TURN_OPTIONS,
+          )
         const restoredStartedAtMs = resolvePendingTurnStartedAtMsFromMessages(
-          messages,
-          pendingTurn.turnId ?? detail.activeTurnId,
+          refreshedMessages,
+          pendingTurn.turnId ?? refreshedDetail.activeTurnId,
         )
+
+        // #region agent log
+        emitDebugLog({
+          location: "useConversationStore.ts:selectConversation",
+          message: "pending turn derived before run decision",
+          hypothesisId: "H-C,H-F",
+          data: {
+            conversationId,
+            pendingTurnState: pendingTurn.state,
+            pendingTurnId: pendingTurn.turnId,
+            detailInteractionState: refreshedDetail.interactionState,
+            detailActiveTurnId: refreshedDetail.activeTurnId,
+            restoredStartedAtMs,
+          },
+        })
+        // #endregion
 
         set((current) => ({
           conversationLoading: false,
           detailsByConversationId: {
             ...current.detailsByConversationId,
-            [conversationId]: detail,
+            [conversationId]: refreshedDetail,
           },
           messagesByConversationId: {
             ...current.messagesByConversationId,
-            [conversationId]: messages,
+            [conversationId]: refreshedMessages,
           },
           pendingTurnByConversationId: {
             ...current.pendingTurnByConversationId,
@@ -1100,7 +1270,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
           ),
         }))
 
-        await startRealtimeRun(conversationId, detail, messages)
+        await startRealtimeRun(conversationId, refreshedDetail, refreshedMessages, { restoreMode: true })
       } catch (error) {
         set({ conversationLoading: false, error: toMessage(error) })
         throw error
