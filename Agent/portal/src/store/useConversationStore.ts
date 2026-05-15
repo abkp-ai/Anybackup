@@ -764,10 +764,13 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
     messages: ConversationMessageSummary[],
   ): Promise<void> {
     const pendingTurn = derivePendingTurnState(detail, messages, detail.interactionState)
+    const effectiveRunId = detail.activeTurnId ?? (
+      messages.length > 0 && messages[messages.length - 1].role === "user"
+        ? messages[messages.length - 1].turnId
+        : undefined
+    )
     const shouldStartRun = shouldStreamPendingTurn(pendingTurn) || (
-      detail.activeTurnId &&
-      messages.length > 0 &&
-      messages[messages.length - 1].role === "user"
+      typeof effectiveRunId === "string" && effectiveRunId
     )
     if (!shouldStartRun) return
     const selectedWorkspace = get().selectedWorkspace
@@ -780,7 +783,7 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
     const runInput: ConversationRunInput = {
       threadId: conversationId,
-      runId: detail.activeTurnId!,
+      runId: effectiveRunId!,
       messages: buildRunRequestMessages(messages),
       state: buildRunRequestState(messages, detail.activeTurnId),
     }
