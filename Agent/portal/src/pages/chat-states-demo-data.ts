@@ -1,4 +1,4 @@
-import type { LayoutTreeContent, LayoutTreeStateSnapshot } from "@/components/chat/components/ag-ui-layout-tree-demo"
+import type { LayoutTreeContent, LayoutTreeStateSnapshot } from "@/components/chat/components/ag-ui-layout-tree-renderer"
 import type { MessageKey } from "@/i18n/messages"
 import type { ConversationMessageSummary } from "@/types/conversation"
 

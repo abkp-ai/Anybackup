@@ -12,7 +12,7 @@ function seedUser() {
     currentUser: {
       id: "user-001",
       username: "admin",
-      displayName: "备份管理员",
+      displayName: "Backup Admin",
       role: "backup_admin",
       tenantId: "tenant-001",
     },
@@ -30,7 +30,7 @@ describe("ConversationSidebar", () => {
       conversations: [
         {
           conversationId: "conv-001",
-          title: "订单数据库恢复",
+          title: "Order database recovery",
           updatedAt: "2026-04-22T16:00:00+08:00",
         },
       ],
@@ -58,13 +58,12 @@ describe("ConversationSidebar", () => {
     expect(aside).toHaveClass("w-[240px]")
     expect(screen.getByText("Anybackup")).toBeInTheDocument()
     expect(screen.getByText("Agent")).toBeInTheDocument()
-    expect(screen.queryByText("工作台 / 对话")).not.toBeInTheDocument()
     expect(newConversationButton).toHaveClass("h-7", "rounded-sm", "text-xs")
     expect(searchInput).toHaveClass("text-xs")
     expect(searchInput.parentElement).toHaveClass("h-7", "rounded-sm")
   })
 
-  it("keeps settings separate from the user menu and shows logout inside the menu", async () => {
+  it("keeps settings and user management separate from the user menu and shows logout inside the menu", async () => {
     const user = userEvent.setup()
 
     render(
@@ -74,11 +73,17 @@ describe("ConversationSidebar", () => {
     )
 
     expect(screen.getAllByRole("button", { name: "Settings" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "User Management" })).toHaveLength(1)
 
-    await user.click(screen.getByRole("button", { name: /备份管理员/ }))
+    await user.click(screen.getByRole("button", { name: /Backup Admin/i }))
 
     expect(screen.getAllByRole("button", { name: "Settings" })).toHaveLength(1)
+    expect(screen.getAllByRole("button", { name: "User Management" })).toHaveLength(1)
+    expect(screen.getByText("System Administrator")).toBeInTheDocument()
+    expect(screen.getByText("admin")).toBeInTheDocument()
+    expect(screen.getByText("Language")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument()
+    expect(screen.getByTestId("sidebar-account-menu-panel")).toHaveClass("fixed", "bottom-[54px]", "left-[248px]")
   })
 
   it("renders history items with the lighter list treatment from the prototype", () => {
@@ -88,7 +93,7 @@ describe("ConversationSidebar", () => {
       </MemoryRouter>,
     )
 
-    const historyButton = screen.getByRole("button", { name: "订单数据库恢复" })
+    const historyButton = screen.getByRole("button", { name: "Order database recovery" })
 
     expect(historyButton).toHaveClass("h-9", "rounded-md", "text-xs")
     expect(historyButton).not.toHaveClass("rounded-2xl")
@@ -100,22 +105,22 @@ describe("ConversationSidebar", () => {
       conversations: [
         {
           conversationId: "conv-001",
-          title: "会话一",
+          title: "Conversation A",
           updatedAt: "2026-04-22T16:00:00+08:00",
         },
         {
           conversationId: "conv-002",
-          title: "会话二",
+          title: "Conversation B",
           updatedAt: "2026-04-22T16:01:00+08:00",
         },
         {
           conversationId: "conv-003",
-          title: "会话三",
+          title: "Conversation C",
           updatedAt: "2026-04-22T16:02:00+08:00",
         },
         {
           conversationId: "conv-004",
-          title: "会话四",
+          title: "Conversation D",
           updatedAt: "2026-04-22T16:03:00+08:00",
         },
       ],
@@ -127,9 +132,24 @@ describe("ConversationSidebar", () => {
       </MemoryRouter>,
     )
 
-    expect(screen.getByTitle("会话一")).toBeInTheDocument()
-    expect(screen.getByTitle("会话二")).toBeInTheDocument()
-    expect(screen.getByTitle("会话三")).toBeInTheDocument()
-    expect(screen.getByTitle("会话四")).toBeInTheDocument()
+    expect(screen.getByTitle("Conversation A")).toBeInTheDocument()
+    expect(screen.getByTitle("Conversation B")).toBeInTheDocument()
+    expect(screen.getByTitle("Conversation C")).toBeInTheDocument()
+    expect(screen.getByTitle("Conversation D")).toBeInTheDocument()
+  })
+
+  it("pins the collapsed account popover to the sidebar edge instead of the trigger width", async () => {
+    useLayoutStore.setState({ sidebarCollapsed: true })
+    const user = userEvent.setup()
+
+    render(
+      <MemoryRouter>
+        <ConversationSidebar />
+      </MemoryRouter>,
+    )
+
+    await user.click(screen.getByTestId("sidebar-account-menu-button"))
+
+    expect(screen.getByTestId("sidebar-account-menu-panel")).toHaveClass("fixed", "bottom-[100px]", "left-[72px]")
   })
 })

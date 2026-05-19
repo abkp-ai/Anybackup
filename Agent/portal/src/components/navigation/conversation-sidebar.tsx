@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import {
   ChevronLeft,
   ChevronRight,
   LoaderCircle,
-  LogOut,
   MessageSquare,
   MessageSquarePlus,
   Search,
   Settings,
-  User,
+  Users,
 } from "lucide-react"
 import { routes } from "@/config/routes"
 import { useI18n } from "@/i18n"
@@ -18,6 +16,7 @@ import { useAuthStore } from "@/store/useAuthStore"
 import { useConversationStore } from "@/store/useConversationStore"
 import { useLayoutStore } from "@/store/useLayoutStore"
 import type { ConversationSummary } from "@/types/conversation"
+import { SidebarAccountMenu } from "@/components/navigation/sidebar-account-menu"
 
 export function ConversationSidebar() {
   const { t } = useI18n()
@@ -34,24 +33,12 @@ export function ConversationSidebar() {
   const selectConversation = useConversationStore((state) => state.selectConversation)
   const setSearchQuery = useConversationStore((state) => state.setSearchQuery)
 
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
   const displayName = currentUser?.displayName ?? t("sidebar.demoUser")
-  const accountName = currentUser?.username ?? "backup_admin"
-  const roleLabel = t("sidebar.backupAdmin")
-
-  useEffect(() => {
-    if (!userMenuOpen) return
-
-    const handler = (event: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setUserMenuOpen(false)
-      }
-    }
-
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [userMenuOpen])
+  const accountName = currentUser?.username ?? "Melon.zhao@aishu.cn"
+  const roleLabel = t("sidebar.systemAdmin")
+  const accountMenuPanelPositionClass = sidebarCollapsed
+    ? "fixed bottom-[100px] left-[72px]"
+    : "fixed bottom-[54px] left-[248px]"
 
   const handleNewConversation = () => {
     activateLocalDraftWorkspace()
@@ -68,13 +55,12 @@ export function ConversationSidebar() {
   }
 
   const handleLogout = async () => {
-    setUserMenuOpen(false)
     await logout()
     navigate(routes.login)
   }
 
   const renderHistoryButton = (conversation: ConversationSummary, collapsed = false) => {
-    const active =
+    const isActiveConversation =
       selectedWorkspace?.kind === "conversation" && selectedWorkspace.conversationId === conversation.conversationId
 
     return (
@@ -88,7 +74,7 @@ export function ConversationSidebar() {
           collapsed
             ? "flex h-10 w-10 items-center justify-center rounded-lg bg-white/85 text-xs font-semibold text-foreground shadow-[var(--shadow-xs)] hover:bg-white"
             : "flex h-9 w-full items-center gap-2 rounded-md px-2.5 text-left text-xs",
-          active
+          isActiveConversation
             ? collapsed
               ? "bg-ai-surface text-ai shadow-card"
               : "bg-accent text-accent-foreground shadow-sm"
@@ -108,40 +94,6 @@ export function ConversationSidebar() {
       </button>
     )
   }
-
-  const renderUserMenuCard = (className: string) => (
-    <div
-      className={cn(
-        "z-[160] w-64 overflow-hidden rounded-xl border border-border/80 bg-card/95 shadow-[0_20px_48px_-28px_rgba(15,23,42,0.35)] backdrop-blur-sm animate-fade-in-scale",
-        className,
-      )}
-    >
-      <div className="border-b border-border/70 bg-gradient-to-br from-ai-surface via-white to-white/95 px-4 py-4">
-        <div className="flex items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[hsl(var(--ai))] to-[hsl(var(--ai)/0.7)] text-primary-foreground shadow-sm">
-            <User className="h-4 w-4" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-foreground">{displayName}</p>
-            <p className="mt-1 text-xs text-muted-foreground">{roleLabel}</p>
-            <p className="mt-2 text-xs text-muted-foreground">
-              {t("sidebar.loginAccount")}：{accountName}
-            </p>
-          </div>
-        </div>
-      </div>
-      <div className="p-2">
-        <button
-          type="button"
-          onClick={() => void handleLogout()}
-          className="focus-ring flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
-        >
-          <LogOut className="h-3.5 w-3.5" />
-          {t("sidebar.logout")}
-        </button>
-      </div>
-    </div>
-  )
 
   return (
     <aside
@@ -237,19 +189,16 @@ export function ConversationSidebar() {
       <div className="flex flex-col gap-1 py-3">
         {sidebarCollapsed ? (
           <>
-            <div className="relative px-2" ref={menuRef}>
-              <button
-                type="button"
-                onClick={() => setUserMenuOpen((open) => !open)}
-                title={displayName}
-                className="focus-ring flex h-10 w-full items-center justify-center rounded-lg bg-white/90 transition-fast hover:bg-white"
-              >
-                <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-[hsl(var(--ai))] to-[hsl(var(--ai)/0.7)] text-primary-foreground">
-                  <User className="h-3.5 w-3.5" />
-                </div>
-              </button>
-
-              {userMenuOpen ? renderUserMenuCard("absolute bottom-0 left-[calc(100%+8px)]") : null}
+            <div className="px-2">
+              <SidebarAccountMenu
+                sidebarCollapsed={sidebarCollapsed}
+                displayName={displayName}
+                accountName={accountName}
+                roleLabel={roleLabel}
+                logoutLabel={t("sidebar.logout")}
+                panelPositionClass={accountMenuPanelPositionClass}
+                onLogout={handleLogout}
+              />
             </div>
             <div className="px-2">
               <button
@@ -265,36 +214,37 @@ export function ConversationSidebar() {
               <button
                 type="button"
                 onClick={() => navigate(routes.settings)}
+                aria-label={t("sidebar.settings")}
                 title={t("sidebar.settings")}
                 className="focus-ring flex h-10 w-full items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
               >
                 <Settings className="h-4 w-4" />
               </button>
             </div>
+            <div className="px-2">
+              <button
+                type="button"
+                onClick={() => navigate(routes.users)}
+                aria-label={t("settings.userManagementTitle")}
+                title={t("settings.userManagementTitle")}
+                className="focus-ring flex h-10 w-full items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
+              >
+                <Users className="h-4 w-4" />
+              </button>
+            </div>
           </>
         ) : (
           <div className="px-2">
             <div className="mb-1.5 flex items-center gap-1">
-              <div className="relative min-w-0 flex-1" ref={menuRef}>
-                <button
-                  type="button"
-                  onClick={() => setUserMenuOpen((open) => !open)}
-                  className={cn(
-                    "focus-ring flex h-9 w-full items-center gap-3 rounded-lg px-3 transition-all duration-200",
-                    userMenuOpen ? "bg-white shadow-sm" : "hover:bg-white/60",
-                  )}
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[hsl(var(--ai))] to-[hsl(var(--ai)/0.7)] text-primary-foreground">
-                    <User className="h-3.5 w-3.5" />
-                  </div>
-                  <div className="min-w-0 flex-1 text-left">
-                    <span className="block truncate text-sm font-medium text-foreground">{displayName}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{roleLabel}</span>
-                  </div>
-                </button>
-
-                {userMenuOpen ? renderUserMenuCard("fixed bottom-4 left-[248px]") : null}
-              </div>
+              <SidebarAccountMenu
+                sidebarCollapsed={sidebarCollapsed}
+                displayName={displayName}
+                accountName={accountName}
+                roleLabel={roleLabel}
+                logoutLabel={t("sidebar.logout")}
+                panelPositionClass={accountMenuPanelPositionClass}
+                onLogout={handleLogout}
+              />
               <button
                 type="button"
                 onClick={toggleSidebar}
@@ -305,14 +255,26 @@ export function ConversationSidebar() {
               </button>
             </div>
 
-            <button
-              type="button"
-              onClick={() => navigate(routes.settings)}
-              className="focus-ring flex h-9 w-full items-center gap-3 rounded-lg px-3 text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
-            >
-              <Settings className="h-4 w-4 shrink-0" />
-              <span className="text-sm font-medium">{t("sidebar.settings")}</span>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => navigate(routes.settings)}
+                aria-label={t("sidebar.settings")}
+                title={t("sidebar.settings")}
+                className="focus-ring flex h-9 flex-1 items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
+              >
+                <Settings className="h-4 w-4 shrink-0" />
+              </button>
+              <button
+                type="button"
+                onClick={() => navigate(routes.users)}
+                aria-label={t("settings.userManagementTitle")}
+                title={t("settings.userManagementTitle")}
+                className="focus-ring flex h-9 flex-1 items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
+              >
+                <Users className="h-4 w-4 shrink-0" />
+              </button>
+            </div>
           </div>
         )}
       </div>

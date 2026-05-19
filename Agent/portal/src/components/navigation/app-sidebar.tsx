@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react"
 import { NavLink, useNavigate } from "react-router-dom"
-import { ChevronLeft, ChevronRight, Layers, LogOut, Settings, User } from "lucide-react"
+import { ChevronLeft, ChevronRight, Layers, Settings, Users } from "lucide-react"
 import { routes } from "@/config/routes"
 import { cn } from "@/lib/cn"
 import { useAuthStore } from "@/store/useAuthStore"
 import { useI18n } from "@/i18n"
 import { useLayoutStore } from "@/store/useLayoutStore"
+import { SidebarAccountMenu } from "@/components/navigation/sidebar-account-menu"
 
 interface NavItem {
   to: string
@@ -22,18 +22,8 @@ export function AppSidebar() {
   const currentUser = useAuthStore((s) => s.currentUser)
   const logout = useAuthStore((s) => s.logout)
   const displayName = currentUser?.displayName ?? t("sidebar.demoUser")
-
-  const [userMenuOpen, setUserMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!userMenuOpen) return
-    const handler = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setUserMenuOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [userMenuOpen])
+  const accountName = currentUser?.username ?? "Melon.zhao@aishu.cn"
+  const roleLabel = t("sidebar.systemAdmin")
 
   const navItems: NavItem[] = [{ to: routes.home, label: t("workspace.breadcrumb.home"), icon: Layers, end: true }]
 
@@ -41,6 +31,7 @@ export function AppSidebar() {
 
   return (
     <aside
+      data-testid="visual-app-sidebar"
       className={cn(
         "relative z-[100] flex h-screen shrink-0 flex-col transition-all duration-200 ease-in-out",
         sidebarWidth,
@@ -91,26 +82,25 @@ export function AppSidebar() {
       </nav>
 
       <div className="flex flex-col gap-1 py-3">
-        <div className={cn("px-2", sidebarCollapsed && "flex flex-col items-center gap-1")} ref={menuRef}>
+        <div className={cn("px-2", sidebarCollapsed && "flex flex-col items-center gap-1")}>
           <div className={cn("flex items-center gap-1", !sidebarCollapsed && "mb-1")}>
-            <button
-              type="button"
-              onClick={() => setUserMenuOpen(!userMenuOpen)}
-              className={cn(
-                "flex items-center gap-3 rounded-lg transition-all duration-200",
-                sidebarCollapsed ? "h-10 w-10 justify-center" : "h-9 flex-1 px-3",
-                userMenuOpen ? "bg-white shadow-sm" : "hover:bg-white/60",
-              )}
-            >
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[hsl(var(--ai))] to-[hsl(var(--ai)/0.7)]">
-                <User className="h-3.5 w-3.5 text-primary-foreground" />
-              </div>
-              {!sidebarCollapsed && <span className="truncate text-sm font-medium text-foreground">{displayName}</span>}
-            </button>
+            <SidebarAccountMenu
+              sidebarCollapsed={sidebarCollapsed}
+              displayName={displayName}
+              accountName={accountName}
+              roleLabel={roleLabel}
+              logoutLabel={t("sidebar.logout")}
+              panelPositionClass={sidebarCollapsed ? "fixed bottom-4 left-[72px]" : "fixed bottom-4 left-[208px]"}
+              onLogout={async () => {
+                await logout()
+                navigate(routes.login)
+              }}
+            />
             {!sidebarCollapsed && (
               <button
                 type="button"
                 onClick={toggleSidebar}
+                data-testid="app-sidebar-collapse-toggle"
                 title={t("sidebar.collapseSidebar")}
                 className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
               >
@@ -118,34 +108,6 @@ export function AppSidebar() {
               </button>
             )}
           </div>
-
-          {userMenuOpen && (
-            <div
-              className={cn(
-                "fixed z-[160] w-56 overflow-hidden rounded-xl border border-border bg-card shadow-lg animate-fade-in-scale",
-                sidebarCollapsed ? "bottom-4 left-[72px]" : "bottom-4 left-[208px]",
-              )}
-            >
-              <div className="border-b border-border p-3">
-                <p className="text-sm font-semibold text-foreground">{displayName}</p>
-                <p className="text-xs text-muted-foreground">{t("sidebar.backupAdmin")}</p>
-              </div>
-              <div className="p-2">
-                <button
-                  type="button"
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/5"
-                  onClick={async () => {
-                    setUserMenuOpen(false)
-                    await logout()
-                    navigate(routes.login)
-                  }}
-                >
-                  <LogOut className="h-3.5 w-3.5" />
-                  {t("sidebar.logout")}
-                </button>
-              </div>
-            </div>
-          )}
         </div>
 
         {sidebarCollapsed ? (
@@ -153,6 +115,7 @@ export function AppSidebar() {
             <button
               type="button"
               onClick={toggleSidebar}
+              data-testid="app-sidebar-expand-toggle"
               title={t("sidebar.expandSidebar")}
               className="flex h-10 w-full items-center justify-center rounded-lg text-muted-foreground transition-all duration-200 hover:bg-white/60 hover:text-foreground"
             >
@@ -162,26 +125,41 @@ export function AppSidebar() {
         ) : null}
 
         <div className="px-2">
-          <NavLink
-            to={routes.settings}
-            title={t("sidebar.settings")}
-            className={({ isActive }) =>
-              cn(
-                "flex w-full items-center gap-3 rounded-lg transition-all duration-200",
-                sidebarCollapsed ? "h-10 justify-center" : "h-9 px-3",
-                isActive
-                  ? "bg-white text-primary shadow-sm"
-                  : "text-muted-foreground hover:bg-white/60 hover:text-foreground",
-              )
-            }
-          >
-            {({ isActive }) => (
-              <>
-                <Settings className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />
-                {!sidebarCollapsed && <span className="text-sm font-medium">{t("sidebar.settings")}</span>}
-              </>
-            )}
-          </NavLink>
+          <div className={cn("flex gap-1", sidebarCollapsed && "flex-col")}>
+            <NavLink
+              to={routes.settings}
+              aria-label={t("sidebar.settings")}
+              title={t("sidebar.settings")}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center justify-center rounded-lg transition-all duration-200",
+                  sidebarCollapsed ? "h-10 w-full" : "h-9 flex-1",
+                  isActive
+                    ? "bg-white text-primary shadow-sm"
+                    : "text-muted-foreground hover:bg-white/60 hover:text-foreground",
+                )
+              }
+            >
+              {({ isActive }) => <Settings className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />}
+            </NavLink>
+
+            <NavLink
+              to={routes.users}
+              aria-label={t("settings.userManagementTitle")}
+              title={t("settings.userManagementTitle")}
+              className={({ isActive }) =>
+                cn(
+                  "flex items-center justify-center rounded-lg transition-all duration-200",
+                  sidebarCollapsed ? "h-10 w-full" : "h-9 flex-1",
+                  isActive
+                    ? "bg-white text-primary shadow-sm"
+                    : "text-muted-foreground hover:bg-white/60 hover:text-foreground",
+                )
+              }
+            >
+              {({ isActive }) => <Users className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />}
+            </NavLink>
+          </div>
         </div>
       </div>
     </aside>

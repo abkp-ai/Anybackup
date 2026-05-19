@@ -1,4 +1,4 @@
-[中文](README_zh.md) | [English](README.md)
+﻿[中文](README_zh.md) | [English](README.md)
 
 # AnyBackup Agent Portal 前端
 
@@ -82,7 +82,7 @@ src/
 
 ## 文档入口
 
-- 从 `docs/README.md` 开始
+- 从 `AGENTS.md` 开始
 - 工程规范与架构文档统一在 `docs/` 目录
 - 详细实现细节下沉在文档中，不放在本 README 顶层
 
@@ -93,3 +93,4 @@ src/
 ## 许可证
 
 本项目遵循 [LICENSE](LICENSE) 中约定的开源许可证。
+

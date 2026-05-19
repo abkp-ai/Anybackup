@@ -719,6 +719,93 @@ describe("conversation-service", () => {
     })
   })
 
+  it("maps conversation-service layout_nodes shape with props.children into layout_tree ui", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        items: [
+          {
+            message_id: "msg_layout_nodes_shape_001",
+            conversation_id: "conv_thought_001",
+            role: "assistant",
+            content_type: "rich_content",
+            content: "",
+            status: "responded",
+            created_at: "2026-05-13T10:01:00.000Z",
+            rich_payload: {
+              ag_ui: {
+                version: "1",
+                events: [
+                  {
+                    type: "ACTIVITY_SNAPSHOT",
+                    timestamp: 1777000200000,
+                    messageId: "act_text_message_001",
+                    activityType: "conversation.ui.layout-tree",
+                    content: {
+                      contract: "conversation.ui.layout-tree@1",
+                      blockId: "text-message",
+                      ui: {
+                        type: "stack",
+                        props: {
+                          gap: "sm",
+                          children: [
+                            {
+                              type: "section",
+                              props: {
+                                children: [
+                                  {
+                                    type: "badge-row",
+                                    props: {
+                                      items: [{ text: "推理", tone: "info" }],
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                            {
+                              type: "section",
+                              props: {
+                                children: [
+                                  {
+                                    type: "markdown",
+                                    props: {
+                                      text: "Collected the request intent and selected the next retrieval step.",
+                                    },
+                                  },
+                                ],
+                              },
+                            },
+                          ],
+                        },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        page: {
+          has_more: false,
+          limit: 100,
+          next_cursor: null,
+        },
+      }),
+    )
+
+    vi.stubGlobal("fetch", fetchMock)
+
+    const [message] = await getConversationMessages("conv_thought_001")
+
+    expect(message.richPayload?.kind).toBe("layout_tree")
+    if (message.richPayload?.kind !== "layout_tree") return
+
+    const stack = message.richPayload.data.activity.ui
+    expect(stack.type).toBe("stack")
+    expect(stack.children?.length).toBe(2)
+    expect(stack.children?.[1]?.children?.[0]?.type).toBe("markdown")
+    expect(stack.children?.[1]?.children?.[0]?.props?.text).toContain("Collected the request intent")
+  })
+
   it("replays layout-tree deltas and state deltas from official AG-UI events", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       jsonResponse({

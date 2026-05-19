@@ -5,7 +5,7 @@ import path from "path"
 import { fileURLToPath } from "url"
 import { viteBaseFromBasePath } from "./src/config/base-path"
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const currentDir = path.dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "")
@@ -35,7 +35,30 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
     resolve: {
       alias: {
-        "@": path.resolve(__dirname, "./src"),
+        "@": path.resolve(currentDir, "./src"),
+      },
+    },
+    build: {
+      modulePreload: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("/src/i18n/messages/zh-CN")) return "locale-zh-CN"
+            if (id.includes("/src/i18n/messages/en")) return "locale-en"
+            if (!id.includes("node_modules")) return undefined
+            if (id.includes("@ag-ui")) return "vendor-agui"
+            if (id.includes("react-markdown") || id.includes("remark") || id.includes("micromark")) {
+              return "vendor-markdown"
+            }
+            if (id.includes("framer-motion")) return "vendor-motion"
+            if (id.includes("react-router")) return "vendor-router"
+            if (id.includes("react-dom")) return "vendor-react-dom"
+            if (id.includes("/react/") || id.includes("scheduler/")) return "vendor-react"
+            if (id.includes("zustand")) return "vendor-zustand"
+            if (id.includes("lucide-react")) return "vendor-icons"
+            return undefined
+          },
+        },
       },
     },
     server: Object.keys(proxy).length > 0 ? { proxy } : undefined,

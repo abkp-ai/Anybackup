@@ -116,7 +116,7 @@ def _make_event(
         "type": event_type,
         "eventId": command.event_id,
         "threadId": str(command.conversation_id),
-        "runId": f"biz-{command.event_id}",
+        "runId": str(command.turn_id),
         "sequence": command.sequence,
         "timestamp": timestamp,
     }

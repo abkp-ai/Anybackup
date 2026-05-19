@@ -10,6 +10,7 @@ const {
   listConversationsMock,
   searchConversationsMock,
   sendMessageMock,
+  startConversationRunMock,
 } = vi.hoisted(() => ({
   createConversationMock: vi.fn(),
   getConversationDetailMock: vi.fn(),
@@ -18,6 +19,7 @@ const {
   listConversationsMock: vi.fn(),
   searchConversationsMock: vi.fn(),
   sendMessageMock: vi.fn(),
+  startConversationRunMock: vi.fn(),
 }))
 
 vi.mock("@/services/conversation-service", () => ({
@@ -28,6 +30,10 @@ vi.mock("@/services/conversation-service", () => ({
   listConversations: listConversationsMock,
   searchConversations: searchConversationsMock,
   sendMessage: sendMessageMock,
+}))
+
+vi.mock("@/services/conversation-run-service", () => ({
+  startConversationRun: startConversationRunMock,
 }))
 
 import { ChatPanel } from "@/components/chat/ChatPanel"
@@ -93,6 +99,152 @@ function messageCreatedStatusEvent(
   }
 }
 
+function emitTextRun(
+  handlers: { onEvent: (event: Record<string, unknown>) => void },
+  input: {
+    conversationId: string
+    turnId: string
+    messageId: string
+    content: string
+    startedAt: number
+  },
+): void {
+  handlers.onEvent({
+    type: "RUN_STARTED",
+    threadId: input.conversationId,
+    runId: input.turnId,
+    timestamp: input.startedAt,
+  })
+  handlers.onEvent({
+    type: "TEXT_MESSAGE_START",
+    messageId: input.messageId,
+    role: "assistant",
+    timestamp: input.startedAt + 1_000,
+  })
+  handlers.onEvent({
+    type: "TEXT_MESSAGE_CONTENT",
+    messageId: input.messageId,
+    delta: input.content,
+    timestamp: input.startedAt + 2_000,
+  })
+  handlers.onEvent({
+    type: "TEXT_MESSAGE_END",
+    messageId: input.messageId,
+    timestamp: input.startedAt + 3_000,
+  })
+  handlers.onEvent({
+    type: "RUN_FINISHED",
+    threadId: input.conversationId,
+    runId: input.turnId,
+    reason: "completed",
+    timestamp: input.startedAt + 4_000,
+  })
+}
+
+function emitCandidateLayoutRun(
+  handlers: { onEvent: (event: Record<string, unknown>) => void },
+  input: {
+    conversationId: string
+    turnId: string
+    messageId: string
+    startedAt: number
+  },
+): void {
+  handlers.onEvent({
+    type: "RUN_STARTED",
+    threadId: input.conversationId,
+    runId: input.turnId,
+    timestamp: input.startedAt,
+  })
+  handlers.onEvent({
+    type: "ACTIVITY_SNAPSHOT",
+    messageId: input.messageId,
+    activityType: "conversation.ui.layout-tree",
+    timestamp: input.startedAt + 1_000,
+    content: {
+      contract: "conversation.ui.layout-tree@1",
+      blockId: "restore_options",
+      ui: {
+        id: "restore_options_root",
+        type: "stack",
+        props: { gap: "lg" },
+        children: [
+          {
+            id: "restore_options_heading",
+            type: "heading",
+            props: {
+              level: 2,
+              text: "Restore options",
+            },
+          },
+          {
+            id: "option_a",
+            type: "card",
+            props: {
+              title: "Option A: Restore by exporting the target table",
+            },
+            children: [
+              {
+                id: "option_a_summary",
+                type: "paragraph",
+                props: {
+                  text: "Recommended option.",
+                },
+              },
+              {
+                id: "option_a_scope",
+                type: "kv-list",
+                props: {
+                  items: [
+                    { label: "Restore scope", value: "Database-level" },
+                    { label: "RPO / RTO", value: "< 2 min / 1.5 h" },
+                  ],
+                },
+              },
+              {
+                id: "option_a_actions",
+                type: "action-row",
+                props: {
+                  actionIds: ["confirm_option_a"],
+                },
+              },
+            ],
+          },
+        ],
+      },
+      actions: [
+        {
+          id: "confirm_option_a",
+          kind: "submit_message",
+          label: "Confirm restore plan",
+          style: "primary",
+          payload: {
+            type: "candidate_selection",
+            candidate_option_id: "option_a",
+            selection: "confirm",
+          },
+        },
+      ],
+      meta: {
+        intent: "clarification",
+        reasoningTraceId: "trace_restore_001",
+      },
+    },
+  })
+  handlers.onEvent({
+    type: "STATE_SNAPSHOT",
+    timestamp: input.startedAt + 2_000,
+    state: {
+      interaction: {
+        status: "clarifying",
+      },
+      selection: {
+        required: true,
+      },
+    },
+  })
+}
+
 describe("ChatPanel", () => {
   beforeEach(() => {
     localStorage.clear()
@@ -108,6 +260,8 @@ describe("ChatPanel", () => {
       recommendedPollIntervalMs: 1000,
       interactionState: "completed",
     })
+    startConversationRunMock.mockReset()
+    startConversationRunMock.mockResolvedValue(undefined)
   })
 
   afterEach(async () => {
@@ -185,120 +339,27 @@ describe("ChatPanel", () => {
       nextPollAfterMs: 0,
     })
 
-    listConversationEventsMock
-      .mockResolvedValueOnce({
-        events: [
-          {
-            statusEventId: "evt_candidate_001",
-            conversationId: "conv_restore_001",
-            turnId: "turn_restore_001",
-            messageId: "msg_candidate_001",
-            eventType: "rich_content.created",
-            sequence: 2,
-            interactionState: "clarifying",
-            messageStatus: "responded",
-            message: {
-              messageId: "msg_candidate_001",
-              conversationId: "conv_restore_001",
-              turnId: "turn_restore_001",
-              role: "assistant",
-              contentType: "rich_content",
-              content: "I found two restore candidates.",
-              createdAt: "2026-04-22T10:00:20.000Z",
-              status: "responded",
-              richPayload: {
-                kind: "candidate_options",
-                data: {
-                  reasoningTraceId: "trace_restore_001",
-                  title: "Restore options",
-                  summary: "Two structured restore candidates are available.",
-                  actions: [
-                    { type: "confirm", label: "Confirm restore plan" },
-                    { type: "reject", label: "Reject plan" },
-                    {
-                      type: "revise",
-                      label: "Add constraints",
-                      inputLabel: "Add constraints",
-                      inputPlaceholder: "For example: generate the plan only.",
-                      submitLabel: "Submit constraints",
-                    },
-                  ],
-                  options: [
-                    {
-                      optionId: "option_a",
-                      title: "Option A: Restore by exporting the target table",
-                      recommended: true,
-                      summary: "Recommended option.",
-                      fields: [
-                        {
-                          key: "scope",
-                          label: "Restore scope",
-                          value: "Database-level",
-                        },
-                        {
-                          key: "rpo_rto",
-                          label: "RPO / RTO",
-                          value: "< 2 min / 1.5 h",
-                        },
-                      ],
-                      extra: {
-                        title: "Recommendation",
-                        content: "This path keeps the production database isolated while recovering the target table.",
-                      },
-                    },
-                  ],
-                },
-              },
-            },
-            createdAt: "2026-04-22T10:00:20.000Z",
-          },
-        ],
-        nextCursor: "cursor_candidate_002",
-        hasMore: false,
-        latestSequence: 2,
-        recommendedPollIntervalMs: 1000,
-        interactionState: "clarifying",
-      })
-      .mockResolvedValueOnce({
-        events: [
-          {
-            statusEventId: "evt_assistant_002",
-            conversationId: "conv_restore_001",
-            turnId: "turn_selection_001",
-            messageId: "msg_assistant_002",
-            eventType: "message.created",
-            sequence: 4,
-            interactionState: "thinking",
-            messageStatus: "responded",
-            message: {
-              messageId: "msg_assistant_002",
-              conversationId: "conv_restore_001",
-              turnId: "turn_selection_001",
-              role: "assistant",
-              contentType: "text",
-              content: "Confirmed. Generating the final restore plan.",
-              createdAt: "2026-04-22T10:00:40.000Z",
-              status: "responded",
-            },
-          },
-          {
-            statusEventId: "evt_completed_selection_001",
-            conversationId: "conv_restore_001",
-            turnId: "turn_selection_001",
-            eventType: "interaction.status_changed",
-            sequence: 5,
-            interactionState: "completed",
-            activeTurnId: null,
-            completedTurnId: "turn_selection_001",
-            createdAt: "2026-04-22T10:00:41.000Z",
-          },
-        ],
-        nextCursor: "cursor_selection_005",
-        hasMore: false,
-        latestSequence: 5,
-        recommendedPollIntervalMs: 1000,
-        interactionState: "completed",
-      })
+    startConversationRunMock.mockImplementation(async (input, handlers) => {
+      if (input.runId === "turn_restore_001") {
+        emitCandidateLayoutRun(handlers, {
+          conversationId: "conv_restore_001",
+          turnId: "turn_restore_001",
+          messageId: "msg_candidate_001",
+          startedAt: Date.parse("2026-04-22T10:00:20.000Z"),
+        })
+        return
+      }
+
+      if (input.runId === "turn_selection_001") {
+        emitTextRun(handlers, {
+          conversationId: "conv_restore_001",
+          turnId: "turn_selection_001",
+          messageId: "msg_assistant_002",
+          content: "Confirmed. Generating the final restore plan.",
+          startedAt: Date.parse("2026-04-22T10:00:40.000Z"),
+        })
+      }
+    })
 
     sendMessageMock.mockResolvedValue({
       conversation: {
@@ -384,89 +445,28 @@ describe("ChatPanel", () => {
       nextPollAfterMs: 0,
     })
 
-    listConversationEventsMock
-      .mockResolvedValueOnce({
-        events: [
-          {
-            statusEventId: "evt_assistant_text_001",
-            conversationId: "conv_text_loop",
-            turnId: "turn_text_001",
-            messageId: "msg_assistant_001",
-            eventType: "message.created",
-            sequence: 2,
-            interactionState: "thinking",
-            messageStatus: "responded",
-            message: {
-              messageId: "msg_assistant_001",
-              conversationId: "conv_text_loop",
-              turnId: "turn_text_001",
-              role: "assistant",
-              contentType: "text",
-              content: "I will inspect the latest restore points first.",
-              createdAt: "2026-04-23T09:00:20.000Z",
-              status: "responded",
-            },
-            createdAt: "2026-04-23T09:00:20.000Z",
-          },
-          {
-            statusEventId: "evt_completed_text_001",
-            conversationId: "conv_text_loop",
-            turnId: "turn_text_001",
-            eventType: "interaction.status_changed",
-            sequence: 3,
-            interactionState: "completed",
-            activeTurnId: null,
-            completedTurnId: "turn_text_001",
-            createdAt: "2026-04-23T09:00:21.000Z",
-          },
-        ],
-        nextCursor: "cursor_text_003",
-        hasMore: false,
-        latestSequence: 3,
-        recommendedPollIntervalMs: 1000,
-        interactionState: "completed",
-      })
-      .mockResolvedValueOnce({
-        events: [
-          {
-            statusEventId: "evt_assistant_text_002",
-            conversationId: "conv_text_loop",
-            turnId: "turn_text_002",
-            messageId: "msg_assistant_002",
-            eventType: "message.created",
-            sequence: 5,
-            interactionState: "thinking",
-            messageStatus: "responded",
-            message: {
-              messageId: "msg_assistant_002",
-              conversationId: "conv_text_loop",
-              turnId: "turn_text_002",
-              role: "assistant",
-              contentType: "text",
-              content: "I will compare the restore points from yesterday afternoon.",
-              createdAt: "2026-04-23T09:01:20.000Z",
-              status: "responded",
-            },
-            createdAt: "2026-04-23T09:01:20.000Z",
-          },
-          {
-            statusEventId: "evt_completed_text_002",
-            conversationId: "conv_text_loop",
-            turnId: "turn_text_002",
-            eventType: "interaction.status_changed",
-            sequence: 6,
-            interactionState: "completed",
-            activeTurnId: null,
-            completedTurnId: "turn_text_002",
-            createdAt: "2026-04-23T09:01:21.000Z",
-          },
-        ],
-        nextCursor: "cursor_text_006",
-        hasMore: false,
-        latestSequence: 6,
-        recommendedPollIntervalMs: 1000,
-        interactionState: "completed",
-      })
+    startConversationRunMock.mockImplementation(async (input, handlers) => {
+      if (input.runId === "turn_text_001") {
+        emitTextRun(handlers, {
+          conversationId: "conv_text_loop",
+          turnId: "turn_text_001",
+          messageId: "msg_assistant_001",
+          content: "I will inspect the latest restore points first.",
+          startedAt: Date.parse("2026-04-23T09:00:20.000Z"),
+        })
+        return
+      }
+
+      if (input.runId === "turn_text_002") {
+        emitTextRun(handlers, {
+          conversationId: "conv_text_loop",
+          turnId: "turn_text_002",
+          messageId: "msg_assistant_002",
+          content: "I will compare the restore points from yesterday afternoon.",
+          startedAt: Date.parse("2026-04-23T09:01:20.000Z"),
+        })
+      }
+    })
 
     sendMessageMock.mockResolvedValue({
       conversation: {

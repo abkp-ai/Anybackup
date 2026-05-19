@@ -22,11 +22,12 @@ function keycloakUser(overrides: Record<string, unknown> = {}) {
   return {
     id: "user-001",
     username: "admin",
-    firstName: "备份管理员",
+    firstName: "Backup Administrator",
     enabled: true,
     createdTimestamp: 1_713_600_000_000,
     attributes: {
-      remark: ["系统内置管理员"],
+      remark: ["System administrator"],
+      lastLoginAt: ["2026-05-08T10:30:00.000Z"],
     },
     ...overrides,
   }
@@ -44,7 +45,7 @@ function storeApiSession() {
     user: {
       id: "user-001",
       username: "admin",
-      displayName: "备份管理员",
+      displayName: "Backup Administrator",
       role: "backup_admin",
       tenantId: "master",
     },
@@ -68,7 +69,7 @@ describe("UserManagementPage", () => {
       currentUser: {
         id: "user-001",
         username: "admin",
-        displayName: "备份管理员",
+        displayName: "Backup Administrator",
         role: "backup_admin",
         tenantId: "tenant-001",
       },
@@ -79,24 +80,58 @@ describe("UserManagementPage", () => {
     useUserManagementStore.setState({
       users: [],
       loading: false,
+      loadedOnce: false,
       saving: false,
       message: null,
       error: null,
       feedbackAutoDismiss: false,
+      searchQuery: "",
+      statusFilter: "all",
     })
   })
 
-  it("renders seeded admin user", async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse([keycloakUser()]))
+  it("renders a compact user list card without the old workbench header and filters", async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse([
+        keycloakUser(),
+        keycloakUser({
+          id: "user-002",
+          username: "operator",
+          firstName: "Operations Lead",
+          enabled: true,
+          attributes: {
+            remark: ["Regional operator"],
+            lastLoginAt: ["2026-05-08T08:00:00.000Z"],
+          },
+        }),
+        keycloakUser({
+          id: "user-003",
+          username: "disabled-user",
+          firstName: "Disabled Analyst",
+          enabled: false,
+          attributes: {
+            remark: ["Temporary account"],
+          },
+        }),
+      ]),
+    )
 
-    render(<UserManagementPage />)
+    const { container } = render(<UserManagementPage />)
 
-    expect(await screen.findByText("admin")).toBeInTheDocument()
-    expect(screen.getAllByText("备份管理员").length).toBeGreaterThan(0)
-    expect(screen.getByText("Enabled")).toBeInTheDocument()
-    expect(
-      screen.queryByText("MVP 阶段为单角色多用户，所有用户固定为备份管理员。"),
-    ).not.toBeInTheDocument()
+    await screen.findByRole("table")
+    const tableCard = container.querySelector("[data-user-management-table-card]")
+
+    if (!(tableCard instanceof HTMLElement)) {
+      throw new Error("Expected user management table card")
+    }
+
+    expect(screen.queryByRole("heading", { name: "User Management", level: 1 })).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("User statistics")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Search users")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Status")).not.toBeInTheDocument()
+    expect(within(tableCard).getByRole("button", { name: "New user" })).toBeInTheDocument()
+    expect(screen.getByRole("table")).toBeInTheDocument()
+    expect(container.querySelector("[data-user-management-header]")).toBeNull()
   })
 
   it("creates a new user and assigns the builtin admin role", async () => {
@@ -111,7 +146,7 @@ describe("UserManagementPage", () => {
         keycloakUser({
           id: "user-002",
           username: "operator",
-          firstName: "备份操作员",
+          firstName: "Operations Lead",
         }),
       ),
     )
@@ -127,7 +162,7 @@ describe("UserManagementPage", () => {
         keycloakUser({
           id: "user-002",
           username: "operator",
-          firstName: "备份操作员",
+          firstName: "Operations Lead",
         }),
         keycloakUser(),
       ]),
@@ -140,7 +175,7 @@ describe("UserManagementPage", () => {
 
     const dialog = await screen.findByRole("dialog")
     await user.type(within(dialog).getByLabelText(/^Username/i), "operator")
-    await user.type(within(dialog).getByLabelText(/^Display name/i), "备份操作员")
+    await user.type(within(dialog).getByLabelText(/^Display name/i), "Operations Lead")
 
     const passwordInput = dialog.querySelector("#password")
     const confirmInput = dialog.querySelector("#confirmPassword")

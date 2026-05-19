@@ -3,9 +3,4 @@ dist
 .env
 .env.local
 .env.*.local
-deploy/*
-!deploy/helm
-deploy/helm/*
-!deploy/helm/agent-web
-deploy/helm/agent-web/*
-!deploy/helm/agent-web/THIRD_PARTY_NOTICES.md
+deploy

@@ -1,0 +1,4 @@
+interface:
+  display_name: "会话富内容"
+  short_description: "生成不带通用 actions 的 Conversation Service JSON 会话 payload。"
+  default_prompt: "当需要生成或校验 Conversation Service 的结构化 JSON 会话消息 payload 时，使用这个 skill。"

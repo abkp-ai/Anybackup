@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router-dom"
 import { motion } from "framer-motion"
 import { AlertCircle, ArrowRight, Eye, EyeOff } from "lucide-react"
 import { publicAssetUrlFromBasePath } from "@/config/base-path"
 import { routes } from "@/config/routes"
 import { isGuideDone } from "@/lib/session"
+import { emitDebugLog } from "@/lib/debug-log"
 import { validateLoginFields } from "@/lib/password-policy"
 import { useAuthStore } from "@/store/useAuthStore"
 import { Button } from "@/components/ui/button"
@@ -14,13 +15,22 @@ import { cn } from "@/lib/cn"
 const logoIconUrl = publicAssetUrlFromBasePath(import.meta.env.BASE_URL, "/images/logo-icon.png")
 
 export function LoginPage() {
+  useEffect(() => {
+    emitDebugLog({
+      location: "LoginPage.tsx:mount",
+      message: "login page rendered",
+      data: { href: window.location.href },
+      hypothesisId: "H1",
+    })
+  }, [])
+
   const { t } = useI18n()
   const [name, setName] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [fieldError, setFieldError] = useState<string | null>(null)
-  const loading = useAuthStore((state) => state.loading)
+  const isLoading = useAuthStore((state) => state.loading)
   const login = useAuthStore((state) => state.login)
   const clearError = useAuthStore((state) => state.clearError)
   const navigate = useNavigate()
@@ -28,7 +38,7 @@ export function LoginPage() {
 
   const onSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
-    if (loading) return
+    if (isLoading) return
 
     setError("")
     setFieldError(null)
@@ -131,13 +141,13 @@ export function LoginPage() {
               </motion.div>
             ) : null}
 
-            <Button type="submit" variant="ai" size="lg" className="mt-2 w-full gap-2" disabled={loading}>
-              {loading ? (
+            <Button type="submit" variant="ai" size="lg" className="mt-2 w-full gap-2" disabled={isLoading}>
+              {isLoading ? (
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
               ) : (
                 <ArrowRight className="h-4 w-4" />
               )}
-              {loading ? t("login.submitting") : t("login.submit")}
+              {isLoading ? t("login.submitting") : t("login.submit")}
             </Button>
           </div>
         </form>

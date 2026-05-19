@@ -73,7 +73,7 @@ def _lifespan(
             return
 
         core_agent_status_consumer = container.core_agent_status_consumer()
-        decision_agent_ag_ui_consumer = container.decision_agent_ag_ui_consumer()
+        decision_agent_bizdata_consumer = container.decision_agent_bizdata_consumer()
         core_agent_kweaver_consumer = container.core_agent_kweaver_consumer()
         outbox_task: asyncio.Task[None] | None = None
         context_merge_task: asyncio.Task[None] | None = None
@@ -81,7 +81,7 @@ def _lifespan(
 
         try:
             await core_agent_status_consumer.start()
-            await decision_agent_ag_ui_consumer.start()
+            await decision_agent_bizdata_consumer.start()
             await core_agent_kweaver_consumer.start()
             outbox_task = asyncio.create_task(
                 _run_outbox_publisher_loop(container, settings),
@@ -109,7 +109,7 @@ def _lifespan(
                 task.cancel()
                 with suppress(asyncio.CancelledError):
                     await task
-            await decision_agent_ag_ui_consumer.close()
+            await decision_agent_bizdata_consumer.close()
             await core_agent_kweaver_consumer.close()
             await core_agent_status_consumer.close()
             await container.event_publisher().close()

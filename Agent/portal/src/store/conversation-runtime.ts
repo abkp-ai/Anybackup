@@ -1,4 +1,8 @@
 import { emitDebugLog } from "@/lib/debug-log"
+import {
+  materializeMessagesFromAgUiWireEvents,
+  type ConversationAgUiEventApi,
+} from "@/services/conversation-response-adapter"
 import type {
   ConversationDetail,
   ConversationMessageSummary,
@@ -111,6 +115,52 @@ export function mergeConversationStatusEvent(
   }
 
   return [...nextMessages, event.message]
+}
+
+export function mergeAgUiWireEventsIntoMessages(
+  messages: ConversationMessageSummary[],
+  events: ConversationStatusEvent[],
+  conversationId: string,
+  turnId?: string,
+): ConversationMessageSummary[] {
+  const wireEvents = events
+    .filter((event) => event.agUiWireEvent)
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((event) => event.agUiWireEvent as unknown as ConversationAgUiEventApi)
+
+  if (wireEvents.length === 0) return messages
+
+  const resolvedTurnId =
+    turnId ?? messages.find((message) => message.role === "user")?.turnId ?? messages[messages.length - 1]?.turnId
+
+  if (!resolvedTurnId) return messages
+
+  const materialized = materializeMessagesFromAgUiWireEvents(
+    conversationId,
+    resolvedTurnId,
+    messages,
+    wireEvents,
+  )
+
+  // #region agent log
+  emitDebugLog({
+    location: "conversation-runtime.ts:mergeAgUiWireEventsIntoMessages",
+    message: "materialized assistant messages from AG-UI wire events",
+    hypothesisId: "H-H",
+    data: {
+      conversationId,
+      turnId: resolvedTurnId,
+      wireEventCount: wireEvents.length,
+      messageCountBefore: messages.length,
+      messageCountAfter: materialized.length,
+      assistantWithRichPayload: materialized.filter(
+        (message) => message.role !== "user" && message.richPayload != null,
+      ).length,
+    },
+  })
+  // #endregion
+
+  return materialized
 }
 
 const TERMINAL_MESSAGE_STATUSES = new Set<ConversationMessageSummary["status"]>(["responded", "failed"])

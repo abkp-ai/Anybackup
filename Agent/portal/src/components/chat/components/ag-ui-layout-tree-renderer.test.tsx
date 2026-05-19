@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { AgUiLayoutTreeDemo } from "@/components/chat/components/ag-ui-layout-tree-demo"
+import { AgUiLayoutTreeRenderer } from "@/components/chat/components/ag-ui-layout-tree-renderer"
 import type { LayoutTreeContent, LayoutTreeStateSnapshot } from "@/types/conversation"
 
 const activity: LayoutTreeContent = {
@@ -399,9 +399,9 @@ const markdownActivity: LayoutTreeContent = {
   },
 }
 
-describe("AgUiLayoutTreeDemo", () => {
+describe("AgUiLayoutTreeRenderer", () => {
   it("renders docs-style card titles and label/value badges", () => {
-    render(<AgUiLayoutTreeDemo activity={activity} stateSnapshot={stateSnapshot} showMeta={false} />)
+    render(<AgUiLayoutTreeRenderer activity={activity} stateSnapshot={stateSnapshot} showMeta={false} />)
 
     expect(screen.getByText("Plan A: alternate-host database restore")).toBeInTheDocument()
     expect(screen.getByText("Recommendation: recommended")).toBeInTheDocument()
@@ -409,7 +409,7 @@ describe("AgUiLayoutTreeDemo", () => {
   })
 
   it("renders error callouts while keeping recovery actions on their own button variant", () => {
-    render(<AgUiLayoutTreeDemo activity={errorActivity} stateSnapshot={errorStateSnapshot} showMeta={false} />)
+    render(<AgUiLayoutTreeRenderer activity={errorActivity} stateSnapshot={errorStateSnapshot} showMeta={false} />)
 
     const callout = screen.getByText("The requested operation cannot continue without a valid restore point.").closest("div")
     const retryButton = screen.getByRole("button", { name: "Retry with wider window" })
@@ -420,7 +420,7 @@ describe("AgUiLayoutTreeDemo", () => {
   })
 
   it("filters empty content and keeps generic actions adaptive instead of forcing full-width slots", () => {
-    render(<AgUiLayoutTreeDemo activity={convergenceActivity} stateSnapshot={stateSnapshot} showMeta={false} />)
+    render(<AgUiLayoutTreeRenderer activity={convergenceActivity} stateSnapshot={stateSnapshot} showMeta={false} />)
 
     const card = screen
       .getByText("Restore directly on production host with an unusually long fallback plan title")
@@ -448,7 +448,7 @@ describe("AgUiLayoutTreeDemo", () => {
 
   it("styles selectable candidate cards closer to the candidate-options visual baseline", () => {
     render(
-      <AgUiLayoutTreeDemo activity={candidateVisualActivity} stateSnapshot={candidateVisualStateSnapshot} showMeta={false} />,
+      <AgUiLayoutTreeRenderer activity={candidateVisualActivity} stateSnapshot={candidateVisualStateSnapshot} showMeta={false} />,
     )
 
     const card = screen.getByText("Plan A: Restore by exporting the target table").closest("section")
@@ -482,7 +482,7 @@ describe("AgUiLayoutTreeDemo", () => {
     const onAction = vi.fn()
 
     render(
-      <AgUiLayoutTreeDemo
+      <AgUiLayoutTreeRenderer
         activity={candidateVisualActivity}
         stateSnapshot={candidateVisualUnselectedStateSnapshot}
         showMeta={false}
@@ -512,7 +512,7 @@ describe("AgUiLayoutTreeDemo", () => {
   it("renders clarification free-text actions as editable inputs and submits the edited value", () => {
     const onSubmitMessage = vi.fn()
 
-    render(<AgUiLayoutTreeDemo activity={clarificationInputActivity} showMeta={false} onSubmitMessage={onSubmitMessage} />)
+    render(<AgUiLayoutTreeRenderer activity={clarificationInputActivity} showMeta={false} onSubmitMessage={onSubmitMessage} />)
 
     const latestButton = screen.getByRole("button", { name: "Use latest safe point" })
     expect(latestButton).toBeInTheDocument()
@@ -546,7 +546,7 @@ describe("AgUiLayoutTreeDemo", () => {
   })
 
   it("renders markdown nodes as formatted content instead of plain preformatted text", () => {
-    render(<AgUiLayoutTreeDemo activity={markdownActivity} showMeta={false} />)
+    render(<AgUiLayoutTreeRenderer activity={markdownActivity} showMeta={false} />)
 
     expect(screen.getByRole("list")).toBeInTheDocument()
     expect(screen.getByText("mysql3306_U0HYTDM3RENXS4EJ", { selector: "strong" })).toBeInTheDocument()

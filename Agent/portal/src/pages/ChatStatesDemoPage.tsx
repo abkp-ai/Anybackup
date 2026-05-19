@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react"
 import { CheckCircle2, CircleHelp, Clock3, MessagesSquare } from "lucide-react"
 import {
-  AgUiLayoutTreeDemo,
+  AgUiLayoutTreeRenderer,
   type LayoutTreeActionEvent,
   type LayoutTreeContent,
   type LayoutTreeStateSnapshot,
-} from "@/components/chat/components/ag-ui-layout-tree-demo"
+} from "@/components/chat/components/ag-ui-layout-tree-renderer"
 import { ChatMessageList } from "@/components/chat/components/chat-message-list"
 import { routes } from "@/config/routes"
 import { useI18n } from "@/i18n"
@@ -266,11 +266,12 @@ interface DemoSectionProps {
   description: string
   contentClassName?: string
   children: React.ReactNode
+  testId?: string
 }
 
-function DemoSection({ icon: Icon, title, description, contentClassName, children }: DemoSectionProps) {
+function DemoSection({ icon: Icon, title, description, contentClassName, children, testId }: DemoSectionProps) {
   return (
-    <section className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-card">
+    <section data-testid={testId} className="overflow-hidden rounded-xl border border-border/70 bg-card shadow-card">
       <header className="border-b border-border/60 bg-white/80 px-5 py-4 backdrop-blur-sm">
         <div className="flex items-start gap-3">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-ai/10 text-ai">
@@ -367,16 +368,18 @@ export function ChatStatesDemoPage() {
           title={t("demo.sectionLayoutTitle")}
           description={t("demo.sectionLayoutTreeDesc")}
           contentClassName="h-auto"
+          testId="chat-demo-layout-tree-section"
         >
           <div className="flex min-h-0 flex-col">
             <div className="border-b border-border/60 bg-white/70 px-5 py-3 text-sm text-muted-foreground">
               <span className="font-medium text-foreground">{t("demo.protocolActionFeedback")}</span> {layoutTreeSummary}
             </div>
-            <div className="p-5">
-              <AgUiLayoutTreeDemo
+            <div className="p-5" data-testid="chat-demo-layout-tree-panel">
+              <AgUiLayoutTreeRenderer
                 activity={demo.layoutTreeDemoActivity}
                 stateSnapshot={demo.layoutTreeDemoState}
                 onSubmitMessage={setLastLayoutTreeAction}
+                testId="chat-demo-layout-tree-renderer"
               />
             </div>
           </div>
@@ -393,7 +396,7 @@ export function ChatStatesDemoPage() {
               <span className="font-medium text-foreground">Node gallery feedback:</span> {nodeGallerySummary}
             </div>
             <div className="p-5">
-              <AgUiLayoutTreeDemo
+              <AgUiLayoutTreeRenderer
                 activity={layoutTreeNodeGalleryActivity}
                 stateSnapshot={layoutTreeNodeGalleryState}
                 onAction={setLastNodeGalleryAction}

@@ -16,12 +16,13 @@ import type {
 
 export type { LayoutTreeAction, LayoutTreeContent, LayoutTreeNode, LayoutTreeStateSnapshot } from "@/types/conversation"
 
-interface AgUiLayoutTreeDemoProps {
+interface AgUiLayoutTreeRendererProps {
   activity: LayoutTreeContent
   stateSnapshot?: LayoutTreeStateSnapshot
   onSubmitMessage?: (payload: Record<string, unknown>, event: LayoutTreeActionEvent) => void
   onAction?: (event: LayoutTreeActionEvent) => void
   showMeta?: boolean
+  testId?: string
 }
 
 export interface LayoutTreeActionEvent {
@@ -271,7 +272,7 @@ function FreeTextClarificationAction({
   const payload = asRecord(action.payload)
   const initialValue = clarificationFreeTextValue(payload) ?? ""
   const [value, setValue] = useState(initialValue)
-  const disabled = value.trim().length === 0
+  const isDisabled = value.trim().length === 0
 
   return (
     <div
@@ -290,7 +291,7 @@ function FreeTextClarificationAction({
         type="button"
         variant={buttonVariant(action.style)}
         size="sm"
-        disabled={disabled}
+        disabled={isDisabled}
         title={action.label}
         className="h-9 shrink-0 px-3 text-xs"
         onClick={(event) => {
@@ -388,7 +389,7 @@ function TabsNode({ node, ctx, nodeKey }: { node: LayoutTreeNode; ctx: RenderCon
     <div key={nodeKey} className="rounded-2xl border border-border/70 bg-background/80 p-3 shadow-sm">
       <div className="flex flex-wrap gap-2 border-b border-border/60 pb-3">
         {resolvedTabs.map((item) => {
-          const active = item.id === (resolvedTabs[activeIndex]?.id ?? null)
+          const isActiveTab = item.id === (resolvedTabs[activeIndex]?.id ?? null)
 
           return (
             <button
@@ -396,7 +397,7 @@ function TabsNode({ node, ctx, nodeKey }: { node: LayoutTreeNode; ctx: RenderCon
               type="button"
               className={cn(
                 "rounded-lg px-3 py-1.5 text-sm font-medium transition-all duration-200",
-                active ? "bg-ai text-primary-foreground shadow-sm" : "bg-muted/70 text-muted-foreground hover:text-foreground",
+                isActiveTab ? "bg-ai text-primary-foreground shadow-sm" : "bg-muted/70 text-muted-foreground hover:text-foreground",
               )}
               onClick={() => setActiveTabId(item.id)}
             >
@@ -863,7 +864,7 @@ function renderNode(node: LayoutTreeNode, ctx: RenderContext, key: string, candi
               (Boolean(candidateId) && isCandidateSelectionPayload(payload))
             const isSelectedAction = Boolean(candidateId && candidateId === ctx.selectionState.selectedCandidateOptionId)
             const isSelectedCandidatePrimary = isCandidateSubmit && isSelectedAction
-            const disabled = isCandidateSubmit && ctx.selectionState.selectionLocked === true
+            const isDisabled = isCandidateSubmit && ctx.selectionState.selectionLocked === true
             const baseVariant =
               action.kind === "open_ref" || action.kind === "open_url"
                 ? "outline"
@@ -894,7 +895,7 @@ function renderNode(node: LayoutTreeNode, ctx: RenderContext, key: string, candi
                     ? "default"
                     : "sm"
                 }
-                disabled={disabled}
+                disabled={isDisabled}
                 title={hasCandidateSubmitAction || isClarificationSubmit ? action.label : undefined}
                 className={cn(
                   hasCandidateSubmitAction
@@ -942,13 +943,14 @@ function renderNode(node: LayoutTreeNode, ctx: RenderContext, key: string, candi
   }
 }
 
-export function AgUiLayoutTreeDemo({
+export function AgUiLayoutTreeRenderer({
   activity,
   stateSnapshot,
   onSubmitMessage,
   onAction,
   showMeta = true,
-}: AgUiLayoutTreeDemoProps) {
+  testId = "ag-ui-layout-tree-renderer",
+}: AgUiLayoutTreeRendererProps) {
   const initialSelection = stateSnapshot?.selection?.selectedCandidateOptionId ?? null
   const initialLocked = stateSnapshot?.selection?.selectionLocked === true
   const [selectionState, setSelectionState] = useState({
@@ -1044,8 +1046,18 @@ export function AgUiLayoutTreeDemo({
     [actionsById, onAction, onSubmitMessage, selectionState],
   )
 
+  const renderedRoot = renderNode(activity.ui, context, activity.blockId)
+
+  if (!renderedRoot) {
+    return null
+  }
+
   return (
-    <section className="rounded-2xl border border-border/70 bg-card p-4 shadow-card sm:p-5">
+    <section
+      data-testid={testId}
+      data-layout-tree-block-id={activity.blockId}
+      className="rounded-2xl border border-border/70 bg-card p-4 shadow-card sm:p-5"
+    >
       {showMeta ? (
         <div className="mb-4 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
           <span className="rounded-full bg-ai/10 px-2 py-0.5 font-medium text-ai">{activity.contract}</span>
@@ -1059,7 +1071,7 @@ export function AgUiLayoutTreeDemo({
           ) : null}
         </div>
       ) : null}
-      {renderNode(activity.ui, context, activity.blockId)}
+      {renderedRoot}
     </section>
   )
 }

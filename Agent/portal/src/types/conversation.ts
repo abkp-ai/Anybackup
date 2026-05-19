@@ -266,11 +266,13 @@ export interface ConversationStatusEvent {
   conversationId: string
   turnId?: string
   messageId?: string
-  eventType: ConversationStatusEventType
+  eventType: ConversationStatusEventType | string
   sequence: number
   interactionState?: InteractionState
   messageStatus?: ConversationMessageStatus
   message?: ConversationMessageSummary
+  /** 会话服务落库的 AG-UI 线协议事件（payload 即 wire event，无嵌套 message） */
+  agUiWireEvent?: Record<string, unknown>
   activeTurnId?: string | null
   completedTurnId?: string
   createdAt: string
@@ -283,6 +285,21 @@ export interface ConversationEventListResult {
   latestSequence: number
   recommendedPollIntervalMs: number
   interactionState?: InteractionState
+}
+
+export interface ConversationRunMessageInput {
+  role: "user" | "assistant"
+  content: string
+}
+
+export interface ConversationRunInput {
+  threadId: string
+  runId: string
+  messages: ConversationRunMessageInput[]
+  state?: Record<string, unknown>
+  tools?: unknown[]
+  context?: unknown[]
+  forwardedProps?: Record<string, unknown>
 }
 
 export interface ConversationScenarioBinding {

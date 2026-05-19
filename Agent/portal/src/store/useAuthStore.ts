@@ -1,4 +1,5 @@
 import { create } from "zustand"
+import { emitDebugLog } from "@/lib/debug-log"
 import { translate } from "@/i18n/messages"
 import { getCurrentUser, login, logoutCurrentUser } from "@/services/auth-service"
 import type { CurrentUser, LoginRequest } from "@/types/auth"
@@ -30,11 +31,25 @@ export const useAuthStore = create<AuthState & AuthActions>((set) => ({
   error: null,
 
   bootstrap: async () => {
+    const startedAt = Date.now()
+    emitDebugLog({
+      location: "useAuthStore.ts:bootstrap:start",
+      message: "auth bootstrap started",
+      data: { hasStoredSession: Boolean(localStorage.getItem("agent_web_auth_session")) },
+      hypothesisId: "H4",
+    })
     try {
       const currentUser = await getCurrentUser()
       set({ currentUser, bootstrapped: true, error: null })
     } catch {
       set({ currentUser: null, bootstrapped: true })
+    } finally {
+      emitDebugLog({
+        location: "useAuthStore.ts:bootstrap:end",
+        message: "auth bootstrap finished",
+        data: { durationMs: Date.now() - startedAt },
+        hypothesisId: "H4",
+      })
     }
   },
 

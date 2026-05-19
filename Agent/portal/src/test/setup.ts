@@ -1,7 +1,11 @@
 import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
-import { afterEach, beforeEach } from "vitest"
-import { LANGUAGE_STORAGE_KEY } from "@/i18n/messages"
+import { afterEach, beforeAll, beforeEach } from "vitest"
+import { ensureLocaleLoaded, getStoredLocale, LANGUAGE_STORAGE_KEY } from "@/i18n/messages"
+
+beforeAll(async () => {
+  await ensureLocaleLoaded(getStoredLocale())
+})
 
 /** Tests often call `localStorage.clear()`; keep locale keyed for stable EN assertions. */
 const storageClear = Storage.prototype.clear

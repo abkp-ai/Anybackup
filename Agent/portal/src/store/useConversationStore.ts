@@ -36,6 +36,7 @@ import type {
   ConversationMessageSummary,
   ConversationRichPayload,
   ConversationRunInput,
+  ConversationStatusEvent,
   ConversationSummary,
   ConversationWorkspaceSelection,
   ConversationWorkspaceState,
@@ -48,7 +49,9 @@ import {
   deriveInteractionStateFromMessages,
   derivePendingTurnState,
   isActiveTurnSettled,
+  isStaleUserOnlyActiveTurn,
   isTurnCompleteForRestore,
+  mergeAgUiWireEventsIntoMessages,
   mergeConversationStatusEvent,
   type DerivePendingTurnOptions,
   type PendingTurnState,
@@ -56,6 +59,24 @@ import {
 
 const RESTORE_PENDING_TURN_OPTIONS: DerivePendingTurnOptions = {
   treatStaleUserOnlyAsComplete: true,
+}
+
+const HISTORICAL_EVENTS_PAGE_SIZE = 100
+
+function hasDisplayableAssistantContent(messages: ConversationMessageSummary[]): boolean {
+  return messages.some(
+    (message) =>
+      message.role !== "user" &&
+      (message.richPayload != null ||
+        (typeof message.content === "string" && message.content.trim().length > 0)),
+  )
+}
+
+function shouldReplayHistoricalRun(detail: ConversationDetail, messages: ConversationMessageSummary[]): boolean {
+  if (!detail.activeTurnId) return false
+  if (isStaleUserOnlyActiveTurn(detail, messages)) return false
+  if (hasDisplayableAssistantContent(messages)) return false
+  return messages.some((message) => message.role === "user")
 }
 
 interface ConversationState {
@@ -580,15 +601,60 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
     messages: ConversationMessageSummary[],
   ): Promise<void> {
     try {
-      const eventsResult = await listConversationEvents(conversationId, { cursor: null })
-      const recoveredMessages = eventsResult.events.reduce(
-        (currentMessages, event) => mergeConversationStatusEvent(currentMessages, event),
-        messages,
+      let cursor: string | null = null
+      let recoveredMessages = messages
+      let interactionState = detail.interactionState
+      let hasMore = true
+      const collectedEvents: ConversationStatusEvent[] = []
+
+      while (hasMore) {
+        const eventsResult = await listConversationEvents(conversationId, {
+          cursor,
+          limit: HISTORICAL_EVENTS_PAGE_SIZE,
+        })
+        collectedEvents.push(...eventsResult.events)
+        recoveredMessages = eventsResult.events.reduce(
+          (currentMessages, event) => mergeConversationStatusEvent(currentMessages, event),
+          recoveredMessages,
+        )
+        interactionState = eventsResult.interactionState ?? interactionState
+        cursor = eventsResult.nextCursor ?? null
+        hasMore = eventsResult.hasMore && cursor !== null
+      }
+
+      const eventsWithEmbeddedMessage = collectedEvents.filter((event) => event.message).length
+      const eventsWithAgUiWire = collectedEvents.filter((event) => event.agUiWireEvent).length
+
+      recoveredMessages = mergeAgUiWireEventsIntoMessages(
+        recoveredMessages,
+        collectedEvents,
+        conversationId,
+        detail.activeTurnId,
       )
+
+      // #region agent log
+      emitDebugLog({
+        location: "useConversationStore.ts:loadHistoricalEvents",
+        message: "historical events layered recovery summary",
+        hypothesisId: "H-H,H-I",
+        data: {
+          conversationId,
+          totalEvents: collectedEvents.length,
+          eventsWithEmbeddedMessage,
+          eventsWithAgUiWire,
+          messagesAfterMerge: recoveredMessages.length,
+          assistantMessages: recoveredMessages.filter((message) => message.role !== "user").length,
+          assistantWithRichPayload: recoveredMessages.filter(
+            (message) => message.role !== "user" && message.richPayload != null,
+          ).length,
+        },
+      })
+      // #endregion
+
       const recoveredDetail = reconcileDetailWithMessages(
         {
           ...detail,
-          interactionState: eventsResult.interactionState ?? detail.interactionState,
+          interactionState: interactionState ?? detail.interactionState,
         },
         recoveredMessages,
       )
@@ -626,6 +692,117 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
       }))
     } catch {
       // If events can't be loaded, keep the basic messages
+    }
+  }
+
+  async function replayHistoricalRunStream(
+    conversationId: string,
+    detail: ConversationDetail,
+    messages: ConversationMessageSummary[],
+  ): Promise<void> {
+    if (!detail.activeTurnId) return
+
+    const selectedWorkspace = get().selectedWorkspace
+    if (selectedWorkspace?.kind !== "conversation" || selectedWorkspace.conversationId !== conversationId) {
+      return
+    }
+
+    // #region agent log
+    emitDebugLog({
+      location: "useConversationStore.ts:replayHistoricalRunStream",
+      message: "replaying historical run stream for assistant content",
+      hypothesisId: "H-G",
+      data: {
+        conversationId,
+        activeTurnId: detail.activeTurnId,
+        messageCount: messages.length,
+      },
+    })
+    // #endregion
+
+    set((current) => ({
+      pendingTurnByConversationId: {
+        ...current.pendingTurnByConversationId,
+        [conversationId]: { state: "idle" },
+      },
+      pendingTurnStartedAtMsByConversationId: omitRecordKey(
+        current.pendingTurnStartedAtMsByConversationId ?? {},
+        conversationId,
+      ),
+    }))
+
+    stopConversationRun(conversationId)
+    conversationRunReconnectAttempts.delete(conversationId)
+
+    const runInput: ConversationRunInput = {
+      threadId: conversationId,
+      runId: detail.activeTurnId,
+      messages: buildRunRequestMessages(messages),
+      state: buildRunRequestState(messages, detail.activeTurnId),
+    }
+
+    const abortController = new AbortController()
+    conversationRunAbortControllers.set(conversationId, abortController)
+
+    let receivedTerminalEvent = false
+
+    try {
+      await startConversationRun(
+        runInput,
+        {
+          onEvent: (event) => {
+            if (event.type === "RUN_FINISHED" || event.type === "RUN_ERROR") {
+              receivedTerminalEvent = true
+            }
+            applyRunEvent(conversationId, event)
+          },
+        },
+        abortController.signal,
+      )
+    } catch (error) {
+      if (!abortController.signal.aborted) {
+        set({ error: toMessage(error) })
+      }
+    } finally {
+      conversationRunAbortControllers.delete(conversationId)
+      conversationRunBuffers.delete(conversationId)
+
+      const latestDetail = get().detailsByConversationId[conversationId] ?? detail
+      const latestMessages = get().messagesByConversationId[conversationId] ?? messages
+      const nextDetail = receivedTerminalEvent
+        ? {
+            ...latestDetail,
+            interactionState: "completed" as const,
+            activeTurnId: undefined,
+          }
+        : latestDetail
+      const pendingTurn = derivePendingTurnState(
+        nextDetail,
+        latestMessages,
+        nextDetail.interactionState,
+        undefined,
+        RESTORE_PENDING_TURN_OPTIONS,
+      )
+
+      set((current) => ({
+        detailsByConversationId: {
+          ...current.detailsByConversationId,
+          [conversationId]: nextDetail,
+        },
+        messagesByConversationId: {
+          ...current.messagesByConversationId,
+          [conversationId]: latestMessages,
+        },
+        pendingTurnByConversationId: {
+          ...current.pendingTurnByConversationId,
+          [conversationId]: pendingTurn,
+        },
+        pendingTurnStartedAtMsByConversationId: pendingTurnStartedAtMsByConversation(
+          current,
+          conversationId,
+          pendingTurn,
+        ),
+      }))
     }
   }
 
@@ -913,6 +1090,12 @@ export const useConversationStore = create<ConversationStore>((set, get) => {
 
     if (!shouldStreamRun) {
       await loadHistoricalEvents(conversationId, detail, messages)
+
+      const latestDetail = get().detailsByConversationId[conversationId] ?? detail
+      const latestMessages = get().messagesByConversationId[conversationId] ?? messages
+      if (options?.restoreMode && shouldReplayHistoricalRun(latestDetail, latestMessages)) {
+        await replayHistoricalRunStream(conversationId, latestDetail, latestMessages)
+      }
       return
     }
     const selectedWorkspace = get().selectedWorkspace

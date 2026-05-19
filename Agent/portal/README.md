@@ -1,4 +1,4 @@
-English | [中文](README_zh.md)
+﻿English | [中文](README_zh.md)
 
 # AnyBackup Agent Portal Frontend
 
@@ -82,7 +82,9 @@ src/
 
 ## Documentation
 
-- Start with `docs/README.md`
+- Start with `AGENTS.md`
+- If your work is in `docs/**`, then follow `docs/AGENTS.md`
+- If your work is in `skills/**`, then follow `skills/AGENTS.md`
 - Engineering baseline and architecture docs are under `docs/`
 - Detailed implementation notes are intentionally kept in docs, not this top-level README
 
@@ -92,13 +94,4 @@ src/
 
 ## License
 
-This project is distributed under the terms of the repository root [LICENSE](../../LICENSE) (SSPL-1.0) together with the root [NOTICE](../../NOTICE).
-
-## Third-Party Notices
-
-When this SPA is packaged into a container image and shipped via a Helm chart, the third-party base images (`node:22-alpine` for build, `nginx:1.30-alpine` for runtime, Alpine Linux) and the npm runtime dependencies bundled by `vite build` are declared in:
-
-- [`deploy/helm/web/THIRD_PARTY_NOTICES.md`](../../deploy/helm/web/THIRD_PARTY_NOTICES.md) — authoritative notice for the shared SPA image.
-- [`deploy/helm/agent-web/THIRD_PARTY_NOTICES.md`](./deploy/helm/agent-web/THIRD_PARTY_NOTICES.md) — cross-reference notice for the `agent-web` chart.
-
-Any change to the runtime dependency set in `package.json` MUST be reflected in the authoritative chart notice in the same commit.
+This project is licensed under the terms in [LICENSE](LICENSE).

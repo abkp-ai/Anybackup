@@ -35,6 +35,7 @@ vi.mock("@/services/conversation-run-service", () => ({
 }))
 
 import { conversationDraftKeyForConversation } from "@/lib/conversation-draft"
+import { mapConversationStatusEventRecord } from "@/services/conversation-response-adapter"
 import { useConversationStore } from "@/store/useConversationStore"
 
 function resetConversationStore(): void {
@@ -317,7 +318,10 @@ describe("useConversationStore", () => {
     await flushMicrotasks()
 
     expect(startConversationRunMock).not.toHaveBeenCalled()
-    expect(listConversationEventsMock).toHaveBeenCalledWith("conv_hist_001", { cursor: null })
+    expect(listConversationEventsMock).toHaveBeenCalledWith("conv_hist_001", {
+      cursor: null,
+      limit: 100,
+    })
 
     const state = useConversationStore.getState()
     expect(state.pendingTurnByConversationId.conv_hist_001).toEqual({ state: "idle" })
@@ -326,6 +330,276 @@ describe("useConversationStore", () => {
         interactionState: "completed",
         activeTurnId: undefined,
       }),
+    )
+  })
+
+  it("materializes assistant content from AG-UI wire events stored in status event payload", async () => {
+    getConversationDetailMock.mockResolvedValueOnce({
+      conversationId: "conv_wire_001",
+      title: "Wire events",
+      createdAt: "2026-05-13T10:00:00.000Z",
+      updatedAt: "2026-05-13T10:05:00.000Z",
+      interactionState: "completed",
+    })
+    getConversationMessagesMock.mockResolvedValueOnce([
+      {
+        messageId: "msg_user_wire_001",
+        conversationId: "conv_wire_001",
+        turnId: "turn_wire_001",
+        role: "user",
+        contentType: "text",
+        content: "show thought about recovery",
+        createdAt: "2026-05-13T10:00:00.000Z",
+        status: "published",
+      },
+    ])
+    const wireApiEvents = [
+      {
+        status_event_id: "evt_wire_text_start",
+        conversation_id: "conv_wire_001",
+        turn_id: "turn_wire_001",
+        message_id: "msg_user_wire_001",
+        event_type: "TEXT_MESSAGE_START",
+        sequence: 2,
+        occurred_at: "2026-05-13T10:01:00.000Z",
+        payload: {
+          type: "TEXT_MESSAGE_START",
+          messageId: "msg_assistant_wire_001",
+          role: "assistant",
+          timestamp: Date.parse("2026-05-13T10:01:00.000Z"),
+        },
+      },
+      {
+        status_event_id: "evt_wire_text_content",
+        conversation_id: "conv_wire_001",
+        turn_id: "turn_wire_001",
+        message_id: "msg_user_wire_001",
+        event_type: "TEXT_MESSAGE_CONTENT",
+        sequence: 3,
+        occurred_at: "2026-05-13T10:01:01.000Z",
+        payload: {
+          type: "TEXT_MESSAGE_CONTENT",
+          messageId: "msg_assistant_wire_001",
+          delta: "Visible reasoning summary for recovery.",
+          timestamp: Date.parse("2026-05-13T10:01:01.000Z"),
+        },
+      },
+      {
+        status_event_id: "evt_wire_text_end",
+        conversation_id: "conv_wire_001",
+        turn_id: "turn_wire_001",
+        message_id: "msg_user_wire_001",
+        event_type: "TEXT_MESSAGE_END",
+        sequence: 4,
+        occurred_at: "2026-05-13T10:01:02.000Z",
+        payload: {
+          type: "TEXT_MESSAGE_END",
+          messageId: "msg_assistant_wire_001",
+          timestamp: Date.parse("2026-05-13T10:01:02.000Z"),
+        },
+      },
+      {
+        status_event_id: "evt_wire_run_finished",
+        conversation_id: "conv_wire_001",
+        turn_id: "turn_wire_001",
+        message_id: "msg_user_wire_001",
+        event_type: "RUN_FINISHED",
+        sequence: 5,
+        occurred_at: "2026-05-13T10:01:03.000Z",
+        payload: {
+          type: "RUN_FINISHED",
+          threadId: "conv_wire_001",
+          runId: "turn_wire_001",
+          reason: "completed",
+          timestamp: Date.parse("2026-05-13T10:01:03.000Z"),
+        },
+      },
+    ] as const
+
+    listConversationEventsMock.mockResolvedValueOnce({
+      events: wireApiEvents.map((event) => mapConversationStatusEventRecord(event)),
+      nextCursor: null,
+      hasMore: false,
+      latestSequence: 5,
+      recommendedPollIntervalMs: 1000,
+      interactionState: "completed",
+    })
+
+    await useConversationStore.getState().selectConversation("conv_wire_001")
+    await flushMicrotasks()
+
+    expect(startConversationRunMock).not.toHaveBeenCalled()
+
+    const assistantMessage = useConversationStore
+      .getState()
+      .messagesByConversationId.conv_wire_001?.find((message) => message.role === "assistant")
+
+    expect(assistantMessage?.content).toBe("Visible reasoning summary for recovery.")
+    expect(assistantMessage?.status).toBe("responded")
+  })
+
+  it("paginates historical events until hasMore is false", async () => {
+    getConversationDetailMock.mockResolvedValueOnce({
+      conversationId: "conv_events_page_001",
+      title: "Paged events",
+      createdAt: "2026-05-13T10:00:00.000Z",
+      updatedAt: "2026-05-13T10:05:00.000Z",
+      interactionState: "completed",
+    })
+    getConversationMessagesMock.mockResolvedValueOnce([
+      {
+        messageId: "msg_user_page_001",
+        conversationId: "conv_events_page_001",
+        turnId: "turn_page_001",
+        role: "user",
+        contentType: "text",
+        content: "show restore status",
+        createdAt: "2026-05-13T10:00:00.000Z",
+        status: "published",
+      },
+    ])
+    listConversationEventsMock
+      .mockResolvedValueOnce({
+        events: [],
+        nextCursor: "cursor_page_2",
+        hasMore: true,
+        latestSequence: 1,
+        recommendedPollIntervalMs: 1000,
+        interactionState: "completed",
+      })
+      .mockResolvedValueOnce({
+        events: [
+          {
+            statusEventId: "evt_assistant_page_001",
+            conversationId: "conv_events_page_001",
+            turnId: "turn_page_001",
+            messageId: "msg_assistant_page_001",
+            eventType: "message.updated",
+            sequence: 2,
+            interactionState: "completed",
+            messageStatus: "responded",
+            createdAt: "2026-05-13T10:05:00.000Z",
+            message: {
+              messageId: "msg_assistant_page_001",
+              conversationId: "conv_events_page_001",
+              turnId: "turn_page_001",
+              role: "assistant",
+              contentType: "text",
+              content: "Restore point is ready.",
+              createdAt: "2026-05-13T10:05:00.000Z",
+              status: "responded",
+            },
+          },
+        ],
+        nextCursor: null,
+        hasMore: false,
+        latestSequence: 2,
+        recommendedPollIntervalMs: 1000,
+        interactionState: "completed",
+      })
+
+    await useConversationStore.getState().selectConversation("conv_events_page_001")
+    await flushMicrotasks()
+
+    expect(listConversationEventsMock).toHaveBeenNthCalledWith(1, "conv_events_page_001", {
+      cursor: null,
+      limit: 100,
+    })
+    expect(listConversationEventsMock).toHaveBeenNthCalledWith(2, "conv_events_page_001", {
+      cursor: "cursor_page_2",
+      limit: 100,
+    })
+    expect(startConversationRunMock).not.toHaveBeenCalled()
+
+    const assistantMessage = useConversationStore
+      .getState()
+      .messagesByConversationId.conv_events_page_001?.find((message) => message.role === "assistant")
+    expect(assistantMessage?.content).toBe("Restore point is ready.")
+  })
+
+  it("replays a historical run when assistant content is missing but the turn is not live", async () => {
+    getConversationDetailMock.mockResolvedValueOnce({
+      conversationId: "conv_replay_001",
+      title: "Replay",
+      createdAt: "2026-05-13T10:00:00.000Z",
+      updatedAt: "2026-05-13T10:01:00.000Z",
+      interactionState: "clarifying",
+      activeTurnId: "turn_replay_001",
+    })
+    getConversationMessagesMock.mockResolvedValueOnce([
+      {
+        messageId: "msg_user_replay_001",
+        conversationId: "conv_replay_001",
+        turnId: "turn_replay_001",
+        role: "user",
+        contentType: "text",
+        content: "show thought chain",
+        createdAt: "2026-05-13T10:00:00.000Z",
+        status: "published",
+      },
+      {
+        messageId: "msg_assistant_replay_001",
+        conversationId: "conv_replay_001",
+        turnId: "turn_replay_001",
+        role: "assistant",
+        contentType: "layout_tree",
+        content: "",
+        createdAt: "2026-05-13T10:01:00.000Z",
+        status: "published",
+      },
+    ])
+    listConversationEventsMock.mockResolvedValue({
+      events: [],
+      nextCursor: null,
+      hasMore: false,
+      latestSequence: 0,
+      recommendedPollIntervalMs: 1000,
+      interactionState: "clarifying",
+    })
+
+    startConversationRunMock.mockImplementation(async (_input, handlers) => {
+      handlers.onEvent({
+        type: "TEXT_MESSAGE_START",
+        messageId: "msg_assistant_replay_001",
+        role: "assistant",
+        timestamp: Date.parse("2026-05-13T10:01:01.000Z"),
+      })
+      handlers.onEvent({
+        type: "TEXT_MESSAGE_CONTENT",
+        messageId: "msg_assistant_replay_001",
+        delta: "Recovered assistant reply.",
+        timestamp: Date.parse("2026-05-13T10:01:02.000Z"),
+      })
+      handlers.onEvent({
+        type: "TEXT_MESSAGE_END",
+        messageId: "msg_assistant_replay_001",
+        timestamp: Date.parse("2026-05-13T10:01:03.000Z"),
+      })
+      handlers.onEvent({
+        type: "RUN_FINISHED",
+        threadId: "conv_replay_001",
+        runId: "turn_replay_001",
+        reason: "completed",
+        timestamp: Date.parse("2026-05-13T10:01:04.000Z"),
+      })
+    })
+
+    await useConversationStore.getState().selectConversation("conv_replay_001")
+    await flushMicrotasks()
+
+    expect(startConversationRunMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "conv_replay_001",
+        runId: "turn_replay_001",
+      }),
+      expect.any(Object),
+      expect.any(AbortSignal),
+    )
+
+    const state = useConversationStore.getState()
+    expect(state.pendingTurnByConversationId.conv_replay_001).toEqual({ state: "idle" })
+    expect(state.messagesByConversationId.conv_replay_001?.map((message) => message.content)).toContain(
+      "Recovered assistant reply.",
     )
   })
 
